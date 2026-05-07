@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Outfit, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import { ChatProvider } from "@/context/ChatContext";
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -31,7 +32,9 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col font-sans">
         <AuthProvider>
-          {children}
+          <ChatProvider>
+            {children}
+          </ChatProvider>
         </AuthProvider>
       </body>
     </html>

@@ -31,7 +31,6 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { SettingsDialog } from "./settings-dialog";
-import { useEffect } from "react";
 
 interface ChatHistoryItem {
     id: string;
@@ -45,13 +44,14 @@ interface HistorySection {
 }
 
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { useChat } from "@/context/ChatContext";
 
 export function ChatSidebar() {
     const { user, login, logout } = useAuth();
+    const { activeChatId, setActiveChatId } = useChat();
     const [isOpen, setIsOpen] = useState(true);
-    const [activeId, setActiveId] = useState("");
     const [chatHistory, setChatHistory] = useState<HistorySection[]>([]);
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export function ChatSidebar() {
 
         const q = query(
             collection(db, `users/${user.uid}/chats`),
-            orderBy("createdAt", "desc")
+            orderBy("updatedAt", "desc")
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -88,26 +88,15 @@ export function ChatSidebar() {
         return () => unsubscribe();
     }, [user]);
 
-    const handleNewChat = async () => {
-        if (!user) {
-            login();
-            return;
-        }
-        try {
-            const docRef = await addDoc(collection(db, `users/${user.uid}/chats`), {
-                title: "New Chat",
-                createdAt: serverTimestamp(),
-            });
-            setActiveId(docRef.id);
-        } catch (error) {
-            console.error("Error creating chat:", error);
-        }
+    const handleNewChat = () => {
+        setActiveChatId(null);
     };
 
     const handleDelete = async (id: string) => {
         if (!user) return;
         try {
             await deleteDoc(doc(db, `users/${user.uid}/chats`, id));
+            if (activeChatId === id) setActiveChatId(null);
             setMenuOpenId(null);
         } catch (error) {
             console.error("Error deleting chat:", error);
@@ -124,7 +113,8 @@ export function ChatSidebar() {
         if (editingId && editValue.trim() && user) {
             try {
                 await updateDoc(doc(db, `users/${user.uid}/chats`, editingId), {
-                    title: editValue
+                    title: editValue,
+                    updatedAt: serverTimestamp()
                 });
             } catch (error) {
                 console.error("Error renaming chat:", error);
@@ -206,13 +196,13 @@ export function ChatSidebar() {
                                                     <div
                                                         className={cn(
                                                             "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/60 transition-all group relative overflow-hidden",
-                                                            activeId === item.id 
+                                                            activeChatId === item.id 
                                                                 ? "bg-white/5 text-white/90 shadow-sm" 
                                                                 : "hover:bg-white/[0.03] hover:text-white/80"
                                                         )}
                                                     >
                                                         <button 
-                                                            onClick={() => setActiveId(item.id)}
+                                                            onClick={() => setActiveChatId(item.id)}
                                                             className="flex-1 flex items-center gap-3 overflow-hidden"
                                                         >
                                                             <MessageSquare className="w-4 h-4 shrink-0 opacity-40 group-hover:opacity-70" />

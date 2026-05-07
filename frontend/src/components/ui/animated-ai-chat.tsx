@@ -19,9 +19,12 @@ import {
     Command,
     Mic,
     MicOff,
+    AlertCircle,
 } from "lucide-react";
+import { ProviderSelector } from "./provider-selector";
 import { motion, AnimatePresence } from "framer-motion";
 import * as React from "react"
+import { useChat } from "@/context/ChatContext";
 
 interface UseAutoResizeTextareaProps {
     minHeight: number;
@@ -158,8 +161,16 @@ export function AnimatedAIChat() {
         maxHeight: 200,
     });
     const [inputFocused, setInputFocused] = useState(false);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const { 
+        activeChatId, 
+        setActiveChatId, 
+        messages, 
+        setMessages, 
+        createNewChat, 
+        sendMessageToFirestore 
+    } = useChat();
     const [isChatMode, setIsChatMode] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
     const commandPaletteRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -167,7 +178,12 @@ export function AnimatedAIChat() {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [messages]);
+        if (messages.length > 0 && !isChatMode) {
+            setIsChatMode(true);
+        } else if (messages.length === 0 && isChatMode) {
+            setIsChatMode(false);
+        }
+    }, [messages, isChatMode]);
 
     const commandSuggestions: CommandSuggestion[] = [
         { 
@@ -271,41 +287,115 @@ export function AnimatedAIChat() {
         }
     };
 
-    const handleSendMessage = () => {
+    const handleSendMessage = async () => {
         if (value.trim() || isRecording) {
-            const userMessage: Message = {
+            const content = value.trim() || "Voice message recorded";
+            const userMessage: any = {
                 role: "user",
-                content: value.trim() || "Voice message recorded",
+                content: content,
                 timestamp: new Date(),
             };
 
-            setMessages(prev => [...prev, userMessage]);
+            const currentMessages = [...messages, userMessage];
+            setMessages(currentMessages);
             setIsChatMode(true);
-            const currentInput = value;
             setValue("");
             adjustHeight(true);
 
-            startTransition(() => {
+            startTransition(async () => {
                 setIsTyping(true);
                 setIsRecording(false);
                 
-                // Simulate AI response
-                setTimeout(() => {
-                    const aiMessage: Message = {
+                try {
+                    let chatId = activeChatId;
+                    
+                    // Create new chat if this is the first message
+                    if (!chatId) {
+                        chatId = await createNewChat(content);
+                    }
+
+                    // Save user message to Firestore
+                    await sendMessageToFirestore(chatId, userMessage);
+
+                    const provider = localStorage.getItem("afs-provider");
+                    const model = localStorage.getItem("afs-model");
+                    const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+                    const apiKey = provider ? keys[provider] : "";
+
+                    const response = await fetch("/api/chat", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            messages: currentMessages,
+                            provider,
+                            model,
+                            apiKey
+                        })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        const errorMessage: any = {
+                            role: "assistant",
+                            content: `Error: ${data.error}`,
+                            timestamp: new Date(),
+                        };
+                        setMessages(prev => [...prev, errorMessage]);
+                    } else {
+                        const aiMessage: any = {
+                            role: "assistant",
+                            content: data.content,
+                            timestamp: new Date(),
+                        };
+                        setMessages(prev => [...prev, aiMessage]);
+                        
+                        // Save assistant message to Firestore
+                        await sendMessageToFirestore(chatId, aiMessage);
+                    }
+                } catch (error) {
+                    console.error("Chat error:", error);
+                    const errorMessage: any = {
                         role: "assistant",
-                        content: `I've received your request: "${currentInput || "Voice command"}". How else can I assist you with this?`,
+                        content: "I encountered a connection error. Please check if your provider is configured correctly.",
                         timestamp: new Date(),
                     };
-                    setMessages(prev => [...prev, aiMessage]);
+                    setMessages(prev => [...prev, errorMessage]);
+                } finally {
                     setIsTyping(false);
-                }, 2000);
+                }
             });
         }
     };
 
     const handleAttachFile = () => {
+        // Mock file attachment for now
         const mockFileName = `file-${Math.floor(Math.random() * 1000)}.pdf`;
         setAttachments(prev => [...prev, mockFileName]);
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) {
+            const fileNames = files.map(file => file.name);
+            setAttachments(prev => [...prev, ...fileNames]);
+        }
     };
 
     const removeAttachment = (index: number) => {
@@ -326,7 +416,29 @@ export function AnimatedAIChat() {
     };
 
     return (
-        <div className="h-screen w-full bg-transparent text-white relative overflow-hidden flex flex-col">
+        <div 
+            className="h-screen w-full bg-transparent text-white relative overflow-hidden flex flex-col"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
+            {/* Drag Overlay */}
+            <AnimatePresence>
+                {isDragging && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-[100] bg-violet-500/10 backdrop-blur-sm border-2 border-dashed border-violet-500/50 flex flex-col items-center justify-center gap-4 rounded-3xl m-4"
+                    >
+                        <div className="w-20 h-20 bg-violet-500/20 rounded-full flex items-center justify-center animate-bounce">
+                            <PlusIcon className="w-10 h-10 text-violet-400" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-violet-300 tracking-tight">Drop files here to attach</h3>
+                        <p className="text-violet-400/60 font-medium">Supports PDFs, images, and text files</p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {/* Background spotlight */}
             {inputFocused && (
                 <motion.div 
@@ -383,11 +495,11 @@ export function AnimatedAIChat() {
                                     </motion.p>
                                 </div>
 
-                                <motion.div 
-                                    layoutId="input-box"
-                                    className="backdrop-blur-3xl bg-white/[0.02] rounded-2xl border border-white/[0.08] overflow-hidden"
-                                    transition={{ type: "spring", damping: 25, stiffness: 120 }}
-                                >
+                                    <motion.div 
+                                        layoutId="input-box"
+                                        className="backdrop-blur-3xl bg-white/[0.02] rounded-2xl border border-white/[0.08]"
+                                        transition={{ type: "spring", damping: 25, stiffness: 120 }}
+                                    >
                                     {renderInputContent()}
                                 </motion.div>
 
@@ -476,7 +588,7 @@ export function AnimatedAIChat() {
                     <div className="max-w-2xl mx-auto px-6 pb-6">
                         <motion.div 
                             layoutId="input-box"
-                            className="pointer-events-auto backdrop-blur-3xl bg-white/[0.05] rounded-[1.5rem] border border-white/[0.08] overflow-hidden"
+                            className="pointer-events-auto backdrop-blur-3xl bg-white/[0.05] rounded-[1.5rem] border border-white/[0.08]"
                             transition={{ type: "spring", damping: 25, stiffness: 120 }}
                         >
                             {renderInputContent()}
@@ -533,6 +645,32 @@ export function AnimatedAIChat() {
     function renderInputContent() {
         return (
             <>
+                {/* Attachments Display */}
+                {attachments.length > 0 && (
+                    <div className="px-4 pt-4 pb-0 flex flex-wrap gap-2">
+                        <AnimatePresence>
+                            {attachments.map((fileName, idx) => (
+                                <motion.div
+                                    key={`${fileName}-${idx}`}
+                                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.8, y: -10 }}
+                                    className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-xs group"
+                                >
+                                    <Paperclip className="w-3 h-3 text-violet-400" />
+                                    <span className="text-white/80 max-w-[150px] truncate">{fileName}</span>
+                                    <button 
+                                        onClick={() => removeAttachment(idx)}
+                                        className="text-white/40 hover:text-red-400 transition-colors ml-1 p-0.5 rounded-md hover:bg-white/10"
+                                    >
+                                        <XIcon className="w-3 h-3" />
+                                    </button>
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                    </div>
+                )}
+                
                 <div className="p-4 relative">
                     <AnimatePresence>
                         {isRecording && (
@@ -615,6 +753,8 @@ export function AnimatedAIChat() {
                         >
                             {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
                         </motion.button>
+                        <div className="h-6 w-[1px] bg-white/10 mx-1" />
+                        <ProviderSelector />
                     </div>
                     
                     <motion.button
