@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
         }
 
         if (provider === "openai") {
-            if (!apiKey) return NextResponse.json({ models: [] });
+            const defaultModels = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"];
+            if (!apiKey) return NextResponse.json({ models: defaultModels });
             try {
                 const response = await fetch("https://api.openai.com/v1/models", {
                     headers: { "Authorization": `Bearer ${apiKey}` }
@@ -32,11 +33,15 @@ export async function POST(req: NextRequest) {
                         .filter((m: any) => m.id.startsWith("gpt-"))
                         .map((m: any) => m.id)
                         .sort();
-                    return NextResponse.json({ models });
+                    
+                    // Ensure our defaults are included if not already there
+                    const combinedModels = Array.from(new Set([...defaultModels, ...models]));
+                    return NextResponse.json({ models: combinedModels });
                 }
-                return NextResponse.json({ models: [], error: "Invalid API Key" });
+                // Even if key is invalid, show defaults so UI isn't empty
+                return NextResponse.json({ models: defaultModels, error: "Invalid API Key - showing defaults" });
             } catch (err) {
-                return NextResponse.json({ models: [], error: "Failed to fetch OpenAI models" });
+                return NextResponse.json({ models: defaultModels, error: "Failed to fetch OpenAI models - showing defaults" });
             }
         }
 

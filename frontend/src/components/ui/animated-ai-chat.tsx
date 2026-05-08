@@ -24,6 +24,8 @@ import {
 import { ProviderSelector } from "./provider-selector";
 import { motion, AnimatePresence } from "framer-motion";
 import * as React from "react"
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useChat } from "@/context/ChatContext";
 
 interface UseAutoResizeTextareaProps {
@@ -548,10 +550,10 @@ export function AnimatedAIChat() {
                                         )}
                                     >
                                         <div className={cn(
-                                            "max-w-[70%] rounded-[1.5rem] px-5 py-3 text-sm leading-relaxed backdrop-blur-3xl border transition-all duration-500",
+                                            "max-w-[80%] rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-3xl border transition-all duration-500",
                                             msg.role === "user" 
-                                                ? "bg-white/[0.08] border-white/[0.1] text-white/90 rounded-tr-none ml-12" 
-                                                : "bg-white/[0.03] border-white/[0.05] text-white/80 rounded-tl-none mr-12"
+                                                ? "bg-white/[0.08] border-white/[0.1] text-white/90 rounded-tr-none ml-16" 
+                                                : "bg-white/[0.03] border-white/[0.05] text-white/80 rounded-tl-none mr-16"
                                         )}>
                                             {msg.role === "assistant" && (
                                                 <div className="flex items-center gap-2 mb-3">
@@ -561,7 +563,21 @@ export function AnimatedAIChat() {
                                                     <span className="text-[11px] uppercase tracking-[0.2em] font-bold text-violet-400/80">Afs AI</span>
                                                 </div>
                                             )}
-                                            <div className="whitespace-pre-wrap font-light tracking-wide">{msg.content}</div>
+                                            <div className="text-sm leading-relaxed text-white/90">
+                                                <ReactMarkdown 
+                                                    remarkPlugins={[remarkGfm]}
+                                                    components={{
+                                                        p: ({ children }) => <p className="mb-2 last:mb-0 font-light tracking-wide">{children}</p>,
+                                                        strong: ({ children }) => <strong className="font-bold text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.3)]">{children}</strong>,
+                                                        code: ({ children }) => <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono">{children}</code>,
+                                                        ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>,
+                                                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-1">{children}</ol>,
+                                                        li: ({ children }) => <li className="font-light">{children}</li>,
+                                                    }}
+                                                >
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
                                         </div>
                                     </motion.div>
                                 ))}
@@ -571,8 +587,8 @@ export function AnimatedAIChat() {
                                         animate={{ opacity: 1, x: 0 }}
                                         className="flex justify-start"
                                     >
-                                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-[2rem] rounded-tl-none px-6 py-4 backdrop-blur-3xl shadow-xl">
-                                            <TypingDots />
+                                        <div className="bg-white/[0.03] border border-white/[0.05] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-3xl shadow-2xl ml-4">
+                                            <ThinkingLoader />
                                         </div>
                                     </motion.div>
                                 )}
@@ -779,6 +795,44 @@ export function AnimatedAIChat() {
             </>
         );
     }
+}
+
+function ThinkingLoader() {
+    return (
+        <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+                {[0, 1, 2].map((i) => (
+                    <motion.div
+                        key={i}
+                        className="w-1.5 h-1.5 bg-violet-400 rounded-full"
+                        animate={{ 
+                            scale: [1, 1.5, 1],
+                            opacity: [0.3, 1, 0.3] 
+                        }}
+                        transition={{
+                            duration: 1,
+                            repeat: Infinity,
+                            delay: i * 0.2,
+                            ease: "easeInOut"
+                        }}
+                    />
+                ))}
+            </div>
+            <motion.span 
+                className="text-[10px] font-bold uppercase tracking-[0.3em] bg-clip-text text-transparent bg-gradient-to-r from-white/40 via-white to-white/40 bg-[length:200%_auto]"
+                animate={{ 
+                    backgroundPosition: ["200% center", "-200% center"] 
+                }}
+                transition={{
+                    duration: 3,
+                    repeat: Infinity,
+                    ease: "linear"
+                }}
+            >
+                Thinking...
+            </motion.span>
+        </div>
+    );
 }
 
 function TypingDots() {
