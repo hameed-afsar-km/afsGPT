@@ -185,7 +185,7 @@ export function AnimatedAIChat() {
         } else if (messages.length === 0 && isChatMode) {
             setIsChatMode(false);
         }
-    }, [messages, isChatMode]);
+    }, [messages, isChatMode, isTyping]);
 
     const commandSuggestions: CommandSuggestion[] = [
         { 
@@ -304,10 +304,10 @@ export function AnimatedAIChat() {
             setValue("");
             adjustHeight(true);
 
+            setIsTyping(true);
+            setIsRecording(false);
+
             startTransition(async () => {
-                setIsTyping(true);
-                setIsRecording(false);
-                
                 try {
                     let chatId = activeChatId;
                     
@@ -344,6 +344,7 @@ export function AnimatedAIChat() {
                             timestamp: new Date(),
                         };
                         setMessages(prev => [...prev, errorMessage]);
+                        setIsTyping(false);
                     } else {
                         const aiMessage: any = {
                             role: "assistant",
@@ -351,6 +352,7 @@ export function AnimatedAIChat() {
                             timestamp: new Date(),
                         };
                         setMessages(prev => [...prev, aiMessage]);
+                        setIsTyping(false);
                         
                         // Save assistant message to Firestore
                         await sendMessageToFirestore(chatId, aiMessage);
@@ -363,7 +365,6 @@ export function AnimatedAIChat() {
                         timestamp: new Date(),
                     };
                     setMessages(prev => [...prev, errorMessage]);
-                } finally {
                     setIsTyping(false);
                 }
             });
@@ -467,8 +468,8 @@ export function AnimatedAIChat() {
                 )}
             >
                 <div className={cn(
-                    "w-full max-w-2xl mx-auto px-6 transition-all duration-1000 ease-in-out",
-                    isChatMode ? "py-12" : "py-0"
+                    "w-full max-w-4xl mx-auto px-10 transition-all duration-1000 ease-in-out",
+                    isChatMode ? "py-16" : "py-0"
                 )}>
                     <AnimatePresence mode="wait">
                         {!isChatMode ? (
@@ -482,13 +483,13 @@ export function AnimatedAIChat() {
                             >
                                 <div className="text-center space-y-3">
                                     <motion.h1 
-                                        className="text-4xl font-medium tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white/90 to-white/40"
+                                        className="text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white/90 to-white/40"
                                         layoutId="main-title"
                                     >
                                         How can I help today?
                                     </motion.h1>
                                     <motion.p 
-                                        className="text-sm text-white/30"
+                                        className="text-base text-white/30"
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         transition={{ delay: 0.2 }}
@@ -528,7 +529,7 @@ export function AnimatedAIChat() {
                         ) : (
                             <motion.div 
                                 key="chat-view"
-                                className="space-y-8 pb-48"
+                                className="space-y-8 pb-64"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 transition={{ duration: 0.5 }}
@@ -550,7 +551,7 @@ export function AnimatedAIChat() {
                                         )}
                                     >
                                         <div className={cn(
-                                            "max-w-[80%] rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-3xl border transition-all duration-500",
+                                            "max-w-[85%] rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-3xl border transition-all duration-500",
                                             msg.role === "user" 
                                                 ? "bg-white/[0.08] border-white/[0.1] text-white/90 rounded-tr-none ml-16" 
                                                 : "bg-white/[0.03] border-white/[0.05] text-white/80 rounded-tl-none mr-16"
@@ -564,19 +565,23 @@ export function AnimatedAIChat() {
                                                 </div>
                                             )}
                                             <div className="text-sm leading-relaxed text-white/90">
-                                                <ReactMarkdown 
-                                                    remarkPlugins={[remarkGfm]}
-                                                    components={{
-                                                        p: ({ children }) => <p className="mb-2 last:mb-0 font-light tracking-wide">{children}</p>,
-                                                        strong: ({ children }) => <strong className="font-bold text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.3)]">{children}</strong>,
-                                                        code: ({ children }) => <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono">{children}</code>,
-                                                        ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>,
-                                                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-1">{children}</ol>,
-                                                        li: ({ children }) => <li className="font-light">{children}</li>,
-                                                    }}
-                                                >
-                                                    {msg.content}
-                                                </ReactMarkdown>
+                                                {msg.role === "assistant" && idx === messages.length - 1 ? (
+                                                    <TypewriterText content={msg.content} />
+                                                ) : (
+                                                    <ReactMarkdown 
+                                                        remarkPlugins={[remarkGfm]}
+                                                        components={{
+                                                            p: ({ children }) => <p className="mb-2 last:mb-0 font-light tracking-wide">{children}</p>,
+                                                            strong: ({ children }) => <strong className="font-bold text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.3)]">{children}</strong>,
+                                                            code: ({ children }) => <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono">{children}</code>,
+                                                            ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>,
+                                                            ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-1">{children}</ol>,
+                                                            li: ({ children }) => <li className="font-light">{children}</li>,
+                                                        }}
+                                                    >
+                                                        {msg.content}
+                                                    </ReactMarkdown>
+                                                )}
                                             </div>
                                         </div>
                                     </motion.div>
@@ -601,7 +606,7 @@ export function AnimatedAIChat() {
             {/* Sticky Input Field in Chat Mode */}
             {isChatMode && (
                 <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none bg-gradient-to-t from-black via-black/80 to-transparent pt-16 pb-2">
-                    <div className="max-w-2xl mx-auto px-6 pb-6">
+                    <div className="max-w-4xl mx-auto px-6 pb-6">
                         <motion.div 
                             layoutId="input-box"
                             className="pointer-events-auto backdrop-blur-3xl bg-white/[0.05] rounded-[1.5rem] border border-white/[0.08]"
@@ -797,6 +802,43 @@ export function AnimatedAIChat() {
     }
 }
 
+function TypewriterText({ content }: { content: string }) {
+    const [displayedContent, setDisplayedContent] = useState("");
+    const [index, setIndex] = useState(0);
+
+    useEffect(() => {
+        // Reset if content changes completely (new message)
+        setDisplayedContent("");
+        setIndex(0);
+    }, [content]);
+
+    useEffect(() => {
+        if (index < content.length) {
+            const timeout = setTimeout(() => {
+                setDisplayedContent(prev => prev + content[index]);
+                setIndex(prev => prev + 1);
+            }, 4); // Extremely fast and smooth typing
+            return () => clearTimeout(timeout);
+        }
+    }, [content, index]);
+
+    return (
+        <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0 font-light tracking-wide">{children}</p>,
+                strong: ({ children }) => <strong className="font-bold text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.3)]">{children}</strong>,
+                code: ({ children }) => <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono">{children}</code>,
+                ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-1">{children}</ol>,
+                li: ({ children }) => <li className="font-light">{children}</li>,
+            }}
+        >
+            {displayedContent}
+        </ReactMarkdown>
+    );
+}
+
 function ThinkingLoader() {
     return (
         <div className="flex items-center gap-3">
@@ -810,9 +852,9 @@ function ThinkingLoader() {
                             opacity: [0.3, 1, 0.3] 
                         }}
                         transition={{
-                            duration: 1,
+                            duration: 0.8,
                             repeat: Infinity,
-                            delay: i * 0.2,
+                            delay: i * 0.15,
                             ease: "easeInOut"
                         }}
                     />
@@ -824,7 +866,7 @@ function ThinkingLoader() {
                     backgroundPosition: ["200% center", "-200% center"] 
                 }}
                 transition={{
-                    duration: 3,
+                    duration: 1.5,
                     repeat: Infinity,
                     ease: "linear"
                 }}
