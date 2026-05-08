@@ -43,7 +43,14 @@ export async function POST(req: NextRequest) {
         if (provider === "gemini") {
             // Gemini model listing is a bit complex via API, providing common ones
             return NextResponse.json({ 
-                models: ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"] 
+                models: [
+                    "gemini-3-flash",
+                    "gemini-2.5-flash", 
+                    "gemini-2.5-pro", 
+                    "gemini-1.5-flash", 
+                    "gemini-1.5-pro", 
+                    "gemini-1.0-pro"
+                ] 
             });
         }
 
