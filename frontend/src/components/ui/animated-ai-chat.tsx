@@ -7,9 +7,6 @@ import {
     Code2,
     Lightbulb,
     Search,
-    MonitorIcon,
-    CircleUserRound,
-    ArrowUpIcon,
     Paperclip,
     PlusIcon,
     SendIcon,
@@ -19,9 +16,10 @@ import {
     Command,
     Mic,
     MicOff,
-    AlertCircle,
+    Volume2,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
+import { VoiceCallModal } from "./voice-call-modal";
 import { motion, AnimatePresence } from "framer-motion";
 import * as React from "react"
 import ReactMarkdown from "react-markdown";
@@ -153,6 +151,7 @@ export function AnimatedAIChat() {
     const [attachments, setAttachments] = useState<string[]>([]);
     const [isTyping, setIsTyping] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
+    const [isCallOpen, setIsCallOpen] = useState(false);
     const [isPending, startTransition] = useTransition();
     const [activeSuggestion, setActiveSuggestion] = useState<number>(-1);
     const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -283,15 +282,36 @@ export function AnimatedAIChat() {
             }
         } else if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            if (value.trim() || isRecording) {
+            if (value.trim()) {
                 handleSendMessage();
             }
         }
     };
 
-    const handleSendMessage = async () => {
-        if (value.trim() || isRecording) {
-            const content = value.trim() || "Voice message recorded";
+    const playTTS = async (text: string) => {
+        try {
+            const res = await fetch("/api/tts", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ text })
+            });
+            if (res.ok) {
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio.play();
+            }
+        } catch (error) {
+            console.error("TTS playback error:", error);
+        }
+    };
+
+    const handleSendMessage = async (overrideText?: string) => {
+        const textToSend = overrideText || value;
+        if (textToSend.trim()) {
+            const content = textToSend.trim();
             const userMessage: any = {
                 role: "user",
                 content: content,
@@ -415,10 +435,60 @@ export function AnimatedAIChat() {
     };
 
     const toggleRecording = () => {
-        setIsRecording(prev => !prev);
+        if (!isRecording) {
+            startRecording();
+        } else {
+            stopRecording();
+        }
+    };
+
+    const startRecording = () => {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert('Your browser does not support Speech Recognition.');
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+            setIsRecording(true);
+        };
+
+        recognition.onresult = (event: any) => {
+            const transcript = event.results[0][0].transcript;
+            setValue(transcript);
+            
+            // Auto-send the voice message once recognition completes
+            handleSendMessage(transcript);
+        };
+
+        recognition.onerror = (event: any) => {
+            console.error("Speech recognition error", event.error);
+            setIsRecording(false);
+        };
+
+        recognition.onend = () => {
+            setIsRecording(false);
+        };
+
+        recognition.start();
+        (window as any).currentRecognition = recognition;
+    };
+
+    const stopRecording = () => {
+        if ((window as any).currentRecognition) {
+            (window as any).currentRecognition.stop();
+        }
+        setIsRecording(false);
     };
 
     return (
+        <>
+        <VoiceCallModal isOpen={isCallOpen} onClose={() => setIsCallOpen(false)} />
         <div 
             className="h-screen w-full bg-transparent text-white relative overflow-hidden flex flex-col"
             onDragOver={handleDragOver}
@@ -557,11 +627,22 @@ export function AnimatedAIChat() {
                                                 : "bg-white/[0.03] border-white/[0.05] text-white/80 rounded-tl-none mr-16"
                                         )}>
                                             {msg.role === "assistant" && (
-                                                <div className="flex items-center gap-2 mb-3">
-                                                    <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center border border-violet-500/30">
-                                                        <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center border border-violet-500/30">
+                                                            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                                                        </div>
+                                                        <span className="text-[11px] uppercase tracking-[0.2em] font-bold text-violet-400/80">Afs AI</span>
                                                     </div>
-                                                    <span className="text-[11px] uppercase tracking-[0.2em] font-bold text-violet-400/80">Afs AI</span>
+                                                    <motion.button
+                                                        whileHover={{ scale: 1.1 }}
+                                                        whileTap={{ scale: 0.9 }}
+                                                        onClick={() => playTTS(msg.content)}
+                                                        className="text-white/30 hover:text-violet-400 transition-colors p-1"
+                                                        title="Read aloud"
+                                                    >
+                                                        <Volume2 className="w-4 h-4" />
+                                                    </motion.button>
                                                 </div>
                                             )}
                                             <div className="text-sm leading-relaxed text-white/90">
@@ -661,6 +742,7 @@ export function AnimatedAIChat() {
                 )}
             </AnimatePresence>
         </div>
+        </>
     );
 
     function renderInputContent() {
@@ -766,25 +848,23 @@ export function AnimatedAIChat() {
                         <motion.button
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
-                            onClick={toggleRecording}
-                            className={cn(
-                                "p-2.5 rounded-xl transition-colors",
-                                isRecording ? "text-red-400 bg-red-500/10" : "text-white/30 hover:text-white/90 hover:bg-white/5"
-                            )}
+                            onClick={() => setIsCallOpen(true)}
+                            title="Start Voice Call"
+                            className="p-2.5 rounded-xl transition-colors text-white/30 hover:text-violet-400 hover:bg-violet-500/10"
                         >
-                            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                            <Mic className="w-5 h-5" />
                         </motion.button>
                         <div className="h-6 w-[1px] bg-white/10 mx-1" />
                         <ProviderSelector />
                     </div>
                     
                     <motion.button
-                        onClick={handleSendMessage}
-                        disabled={isTyping || (!value.trim() && !isRecording)}
+                        onClick={() => handleSendMessage()}
+                        disabled={isTyping || !value.trim()}
                         className={cn(
                             "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
                             "flex items-center gap-2",
-                            (value.trim() || isRecording)
+                            value.trim()
                                 ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                                 : "bg-white/5 text-white/20"
                         )}
