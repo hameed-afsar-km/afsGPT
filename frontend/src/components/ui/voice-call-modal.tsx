@@ -14,8 +14,8 @@ export interface VoiceCallModalProps {
     onClose: () => void;
 }
 
-// ─── Full-Screen Waveform ─────────────────────────────────────────────────────
-function FullScreenWaveform({
+// ─── Single Live Waveform ─────────────────────────────────────────────────────
+function LiveWaveform({
     analyserNode,
     phase,
 }: {
@@ -25,51 +25,35 @@ function FullScreenWaveform({
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const rafRef = useRef<number>(0);
 
-    const phaseConfig = {
-        idle: { color: "#ffffff", glow: "#ffffff" },
-        listening: { color: "#ffffff", glow: "#ffffff" },
-        thinking: { color: "#a78bfa", glow: "#8b5cf6" }, // Purple
-        speaking: { color: "#38bdf8", glow: "#0284c7" }, // Blue
-    }[phase];
+    const colorMap: Record<Phase, string> = {
+        idle: "#6366f1",
+        listening: "#34d399",
+        thinking: "#fbbf24",
+        speaking: "#818cf8",
+    };
 
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d")!;
-        const { color, glow } = phaseConfig;
+        const color = colorMap[phase];
 
         const draw = () => {
             rafRef.current = requestAnimationFrame(draw);
-            
-            // Handle resizing gracefully
-            const parent = canvas.parentElement;
-            if (parent) {
-                canvas.width = parent.clientWidth;
-                canvas.height = parent.clientHeight;
-            }
             const W = canvas.width;
             const H = canvas.height;
-            
             ctx.clearRect(0, 0, W, H);
 
             if (!analyserNode) {
-                // Smooth sine wave for idle/thinking
+                // Gentle sine idle animation
                 const t = performance.now() / 1000;
                 ctx.beginPath();
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = color;
-                ctx.shadowColor = glow;
-                ctx.shadowBlur = phase === "thinking" ? 30 : 15;
-                ctx.lineJoin = "round";
-                ctx.lineCap = "round";
-                
-                const speed = phase === "thinking" ? 4 : 2;
-                const amplitude = phase === "thinking" ? 15 : 5;
-                
-                for (let x = 0; x <= W; x += 2) {
-                    // Taper off the edges for a clean line
-                    const taper = Math.sin((x / W) * Math.PI);
-                    const y = H / 2 + Math.sin((x / W) * Math.PI * 6 + t * speed) * amplitude * taper;
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = color + "50";
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 6;
+                for (let x = 0; x <= W; x++) {
+                    const y = H / 2 + Math.sin((x / W) * Math.PI * 4 + t * 2) * 6;
                     x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                 }
                 ctx.stroke();
@@ -81,56 +65,49 @@ function FullScreenWaveform({
             analyserNode.getByteTimeDomainData(td);
 
             ctx.beginPath();
-            ctx.lineWidth = 6;
+            ctx.lineWidth = 2.5;
             ctx.strokeStyle = color;
-            ctx.shadowColor = glow;
-            ctx.shadowBlur = 25;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12;
             ctx.lineJoin = "round";
             ctx.lineCap = "round";
 
             const sliceW = W / bufLen;
             let x = 0;
             for (let i = 0; i < bufLen; i++) {
-                // Taper the waveform at the edges
-                const taper = Math.sin((i / bufLen) * Math.PI);
-                const v = td[i] / 128.0; // 0 to 2
-                const y = (H / 2) + ((v - 1) * (H / 2) * taper * 1.5); // scale amplitude and apply taper
-                
+                const y = ((td[i] / 128.0) * H) / 2;
                 i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                 x += sliceW;
             }
+            ctx.lineTo(W, H / 2);
             ctx.stroke();
 
-            // Frequency based glow/fill below the wave
+            // Mirror fill glow
             const freq = new Uint8Array(analyserNode.frequencyBinCount);
             analyserNode.getByteFrequencyData(freq);
             const avgVol = freq.reduce((a, b) => a + b, 0) / freq.length;
 
-            if (avgVol > 5) {
-                const grad = ctx.createLinearGradient(0, H/2 - 50, 0, H/2 + 50);
-                grad.addColorStop(0, "transparent");
-                grad.addColorStop(0.5, glow + "40");
+            if (avgVol > 10) {
+                const grad = ctx.createLinearGradient(0, 0, 0, H);
+                grad.addColorStop(0, color + "40");
+                grad.addColorStop(0.5, color + "10");
                 grad.addColorStop(1, "transparent");
-                
                 ctx.fillStyle = grad;
-                ctx.fillRect(0, 0, W, H);
+                ctx.fill();
             }
         };
 
         draw();
         return () => cancelAnimationFrame(rafRef.current);
-    }, [analyserNode, phase, phaseConfig]);
+    }, [analyserNode, phase]);
 
     return (
-        <div className="w-full max-w-4xl h-48 relative">
-            {/* Soft background glow reflecting the phase */}
-            <motion.div 
-                className="absolute inset-0 blur-[100px] opacity-20 pointer-events-none rounded-full"
-                animate={{ backgroundColor: phaseConfig.glow }}
-                transition={{ duration: 1 }}
-            />
-            <canvas ref={canvasRef} className="w-full h-full relative z-10" />
-        </div>
+        <canvas
+            ref={canvasRef}
+            width={800}
+            height={300}
+            className="w-full max-w-3xl h-[200px] md:h-[300px] object-contain"
+        />
     );
 }
 
@@ -251,8 +228,9 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             if (spoken) {
                 handleSpokenText(spoken);
             } else {
+                // Nothing detected — listen again
                 setTimeout(() => {
-                    if (isOpenRef.current && phaseRef.current === "listening") {
+                    if (isOpenRef.current && phaseRef.current === "listening" && !isMutedRef.current) {
                         startListening();
                     }
                 }, 300);
@@ -261,6 +239,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
 
         recognition.onerror = (event: any) => {
             if (event.error === "aborted" || event.error === "no-speech") {
+                // silently restart
                 if (isOpenRef.current) {
                     setTimeout(() => startListening(), 400);
                 }
@@ -278,11 +257,13 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
 
         setPhaseAndAnalyser("thinking", null);
 
+        // Add user message
         const userMsg: any = { role: "user", content: text, timestamp: new Date() };
         const updated = [...messagesRef.current, userMsg];
         setMessages(updated);
         messagesRef.current = updated;
 
+        // Firestore
         let chatId = activeChatIdRef.current;
         try {
             if (!chatId) {
@@ -292,6 +273,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             await sendMessageToFirestore(chatId, userMsg);
         } catch { /* non-critical */ }
 
+        // Call AI
         try {
             const provider = localStorage.getItem("afs-provider");
             const model = localStorage.getItem("afs-model");
@@ -321,6 +303,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             await speakText(aiContent);
         } catch (err) {
             console.error("AI error:", err);
+            // Restart listening
             if (isOpenRef.current) {
                 setPhaseAndAnalyser("listening", micAnalyserRef.current);
                 setTimeout(() => startListening(), 400);
@@ -346,7 +329,9 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             const audio = new Audio(url);
             currentAudioRef.current = audio;
 
+            // Wire up analyser for AI waveform
             const ctx = getOrCreateAudioCtx();
+            // MediaElementSourceNode can only be created once per element
             const src = ctx.createMediaElementSource(audio);
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 2048;
@@ -366,6 +351,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             console.error("TTS play error:", err);
         }
 
+        // Back to listening
         if (isOpenRef.current) {
             setPhaseAndAnalyser("listening", micAnalyserRef.current);
             setTimeout(() => startListening(), 300);
@@ -387,6 +373,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
         });
 
         return () => {
+            // Cleanup on unmount / close
             if (recognitionRef.current) {
                 recognitionRef.current.onend = null;
                 recognitionRef.current.onerror = null;
@@ -433,6 +420,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             const next = !prev;
             isMutedRef.current = next;
             if (next) {
+                // Stop listening
                 try { recognitionRef.current?.stop(); } catch { /* ignore */ }
             } else if (phaseRef.current === "listening") {
                 setTimeout(() => startListening(), 200);
@@ -441,6 +429,15 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
         });
     }, [startListening]);
 
+    // ── Color based on phase ──────────────────────────────────────────────────
+    const colors: Record<Phase, string> = {
+        idle: "#6366f1",
+        listening: "#34d399",
+        thinking: "#fbbf24",
+        speaking: "#818cf8",
+    };
+    const color = colors[phase];
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -448,52 +445,95 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[300] flex flex-col items-center justify-between bg-[#0a0a0a] overflow-hidden font-sans"
+                    transition={{ duration: 0.5 }}
+                    className="fixed inset-0 z-[200] flex flex-col items-center justify-between overflow-hidden"
+                    style={{
+                        background: "radial-gradient(circle at center, rgba(20,15,35,0.95) 0%, rgba(5,5,10,0.98) 100%)",
+                    }}
                 >
-                    {/* Top Header */}
-                    <div className="w-full p-8 flex items-center justify-center">
+                    {/* Ambient Background Glow based on phase */}
+                    <motion.div
+                        className="absolute inset-0 opacity-30 pointer-events-none"
+                        animate={{
+                            background: `radial-gradient(circle at 50% 40%, ${color}40 0%, transparent 60%)`,
+                        }}
+                        transition={{ duration: 2 }}
+                    />
+
+                    {/* Top Section: Phase Indicator */}
+                    <div className="pt-20 flex flex-col items-center gap-3 z-10">
+                        <motion.div
+                            className="w-3 h-3 rounded-full shadow-lg"
+                            style={{ 
+                                background: color,
+                                boxShadow: `0 0 20px ${color}`
+                            }}
+                            animate={{
+                                opacity: phase === "thinking" ? [1, 0.4, 1] : 1,
+                                scale: phase === "listening" ? [1, 1.5, 1] : 1,
+                            }}
+                            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                        />
                         <motion.span
-                            initial={{ opacity: 0, y: -20 }}
+                            key={phase}
+                            initial={{ opacity: 0, y: -10 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className="text-white/40 text-sm font-medium tracking-widest uppercase"
+                            className="text-sm font-semibold tracking-[0.3em] uppercase"
+                            style={{ color }}
                         >
-                            {label}
+                            {isMuted ? "Muted" : label}
                         </motion.span>
                     </div>
 
-                    {/* Central Huge Waveform */}
-                    <div className="flex-1 flex w-full items-center justify-center px-10">
-                        <FullScreenWaveform analyserNode={analyserNode} phase={phase} />
+                    {/* Center Section: Huge Live Waveform */}
+                    <div className="flex-1 w-full flex items-center justify-center px-8 z-10">
+                        <LiveWaveform analyserNode={analyserNode} phase={phase} />
                     </div>
 
-                    {/* Bottom Controls */}
-                    <div className="w-full pb-16 flex flex-col items-center gap-8 relative z-20">
-                        <div className="flex items-center gap-8">
+                    {/* Bottom Section: Controls */}
+                    <div className="pb-20 flex flex-col items-center gap-8 z-10">
+                        <div className="flex items-center gap-12">
                             {/* Mute Button */}
                             <motion.button
                                 whileHover={{ scale: 1.1 }}
                                 whileTap={{ scale: 0.9 }}
                                 onClick={toggleMute}
                                 className={cn(
-                                    "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
+                                    "w-16 h-16 rounded-full flex items-center justify-center backdrop-blur-xl transition-all duration-300",
                                     isMuted
-                                        ? "bg-white text-black"
-                                        : "bg-white/10 text-white hover:bg-white/20"
+                                        ? "bg-white/20 text-white shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                                        : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white"
                                 )}
+                                title={isMuted ? "Unmute" : "Mute"}
                             >
-                                {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                                {isMuted
+                                    ? <MicOff className="w-6 h-6" />
+                                    : <Mic className="w-6 h-6" />
+                                }
                             </motion.button>
 
                             {/* End Call Button */}
                             <motion.button
-                                whileHover={{ scale: 1.1 }}
-                                whileTap={{ scale: 0.9 }}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
                                 onClick={handleEndCall}
-                                className="w-16 h-16 rounded-full flex items-center justify-center bg-red-500 text-white"
+                                className="w-20 h-20 rounded-full flex items-center justify-center text-white"
+                                style={{
+                                    background: "#ef4444",
+                                    boxShadow: "0 0 40px rgba(239,68,68,0.5), inset 0 0 20px rgba(255,255,255,0.2)",
+                                }}
+                                title="End Voice Chat"
                             >
-                                <PhoneOff className="w-6 h-6" />
+                                <PhoneOff className="w-8 h-8" />
                             </motion.button>
+
+                            {/* Placeholder to balance the layout */}
+                            <div className="w-16 h-16" />
                         </div>
+                        
+                        <p className="text-xs text-white/30 tracking-widest font-light">
+                            Just talk naturally
+                        </p>
                     </div>
                 </motion.div>
             )}

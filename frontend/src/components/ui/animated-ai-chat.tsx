@@ -634,15 +634,13 @@ export function AnimatedAIChat() {
                                                         </div>
                                                         <span className="text-[11px] uppercase tracking-[0.2em] font-bold text-violet-400/80">Afs AI</span>
                                                     </div>
-                                                    <motion.button
-                                                        whileHover={{ scale: 1.1 }}
-                                                        whileTap={{ scale: 0.9 }}
+                                                    <button 
                                                         onClick={() => playTTS(msg.content)}
-                                                        className="text-white/30 hover:text-violet-400 transition-colors p-1"
+                                                        className="p-1.5 rounded-full hover:bg-white/10 text-white/40 hover:text-white/80 transition-colors"
                                                         title="Read aloud"
                                                     >
                                                         <Volume2 className="w-4 h-4" />
-                                                    </motion.button>
+                                                    </button>
                                                 </div>
                                             )}
                                             <div className="text-sm leading-relaxed text-white/90">
