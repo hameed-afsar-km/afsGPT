@@ -970,7 +970,7 @@ export function AnimatedAIChat() {
     return (
       <>
         {/* Analysis Status & Attachments Header */}
-        {(fileAttachedToNextMessage.length > 0 || isUploading) && (
+        {(fileAttachedToNextMessage.length > 0 || isUploading || ragFileName) && (
           <div className="px-5 pt-4 pb-2 border-b border-white/[0.05] flex items-center justify-between">
             <div className="flex flex-wrap gap-3 items-center">
               <AnimatePresence mode="popLayout">
@@ -983,6 +983,16 @@ export function AnimatedAIChat() {
                   >
                     <LoaderIcon className="w-3 h-3 animate-spin" />
                     Analyzing
+                  </motion.div>
+                )}
+                {fileAttachedToNextMessage.length === 0 && !isUploading && ragFileName && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-medium text-white/40 italic"
+                  >
+                    <FileText className="w-3 h-3 text-violet-400/50" />
+                    Document context active
                   </motion.div>
                 )}
                 {fileAttachedToNextMessage.map((fileName, idx) => (
@@ -1080,8 +1090,8 @@ export function AnimatedAIChat() {
                 "p-2.5 rounded-xl transition-colors",
                 isUploading
                   ? "text-violet-400 cursor-wait opacity-50"
-                  : ragFileName
-                    ? "text-violet-400 bg-violet-500/10"
+                  : fileAttachedToNextMessage.length > 0
+                    ? "text-violet-400 bg-violet-500/10 shadow-[0_0_10px_rgba(139,92,246,0.2)]"
                     : "text-white/30 hover:text-white/90 hover:bg-white/5",
               )}
             >
