@@ -36,7 +36,7 @@ def enhance_prompt_with_ollama(user_prompt: str) -> str:
     return user_prompt
 
 def generate_image(prompt: str, save_dir: str) -> dict:
-    """Generates an image using FLUX.1-schnell and saves it."""
+    """Generates an image using FLUX.1-dev and saves it."""
     if not HF_TOKEN:
         return {"error": "HF_TOKEN environment variable not set. Please set it to use image generation."}
 

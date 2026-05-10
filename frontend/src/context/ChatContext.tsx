@@ -41,7 +41,7 @@ interface ChatContextType {
     images: GeneratedImage[];
     createNewChat: (firstMessage: string) => Promise<string>;
     sendMessageToFirestore: (chatId: string, message: Message) => Promise<void>;
-    deleteMessagesAfter: (chatId: string, index: number) => Promise<void>;
+    deleteMessagesAfter: (chatId: string, index: number, newMessage?: Message) => Promise<void>;
     saveGeneratedImage: (chatId: string, url: string, prompt: string) => Promise<void>;
 }
 
@@ -155,22 +155,32 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         });
     };
 
-    const deleteMessagesAfter = async (chatId: string, index: number) => {
+    const deleteMessagesAfter = async (chatId: string, index: number, newMessage?: Message) => {
         if (!user) return;
         const q = query(
             collection(db, `users/${user.uid}/chats/${chatId}/messages`),
             orderBy("timestamp", "asc")
         );
         const snapshot = await getDocs(q);
-        // We want to delete the message at 'index' and everything after it
-        // because handleSendMessage will append the NEW version of the edited message.
         const docsToDelete = snapshot.docs.slice(index);
         
+        const batch = writeBatch(db);
+        
         if (docsToDelete.length > 0) {
-            const batch = writeBatch(db);
             docsToDelete.forEach(d => batch.delete(d.ref));
-            await batch.commit();
         }
+
+        if (newMessage) {
+            const newMessageRef = doc(collection(db, `users/${user.uid}/chats/${chatId}/messages`));
+            batch.set(newMessageRef, {
+                ...newMessage,
+                timestamp: serverTimestamp()
+            });
+            const chatRef = doc(db, `users/${user.uid}/chats`, chatId);
+            batch.update(chatRef, { updatedAt: serverTimestamp() });
+        }
+        
+        await batch.commit();
     };
 
     const saveGeneratedImage = async (chatId: string, url: string, prompt: string) => {

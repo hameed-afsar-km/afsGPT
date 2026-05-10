@@ -5,7 +5,7 @@ Endpoints:
   POST /upload              — Accept a file, ingest it into ChromaDB, return session_id
   POST /query               — Answer a question using the stored collection
   DELETE /clear             — Wipe a collection (start fresh)
-  POST /api/generate-image  — Generate an image via FLUX.1-schnell (Qwen-enhanced prompt)
+  POST /api/generate-image  — Generate an image via FLUX.1-dev (Qwen-enhanced prompt)
   GET  /static/images/*     — Serve generated images
 """
 

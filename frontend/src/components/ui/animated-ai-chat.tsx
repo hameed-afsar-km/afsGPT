@@ -239,7 +239,7 @@ export function AnimatedAIChat() {
     } else if (messages.length === 0 && !activeChatId && isChatMode) {
       setIsChatMode(false);
     }
-  }, [messages, isChatMode, activeChatId]);
+  }, [messages, isChatMode, activeChatId, isTyping, isGenerating]);
 
   const commandSuggestions: CommandSuggestion[] = [
     {
@@ -420,33 +420,45 @@ export function AnimatedAIChat() {
       setValue("");
       adjustHeight(true);
 
-      if (historyLimit !== undefined && activeChatId) {
-        await deleteMessagesAfter(activeChatId, historyLimit);
-      }
-
       setIsRecording(false);
+
+      const imageKeywords = /\b(generate|create|draw|make|produce|render|paint|design|illustrate|show me)\b.{0,40}\b(image|picture|photo|illustration|art|artwork|painting|drawing|portrait|landscape|wallpaper)\b/i;
+      const isImageRequest = imageKeywords.test(content) || /^(imagine|visualize|depict)\b/i.test(content);
+
+      if (activeChatId) {
+        if (isImageRequest) {
+          setGeneratingChatIds(prev => new Set(prev).add(activeChatId));
+        } else {
+          setTypingChatIds(prev => new Set(prev).add(activeChatId));
+        }
+      }
 
       startTransition(async () => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
         let chatId = activeChatId;
 
-        if (chatId) {
-          setGeneratingChatIds(prev => new Set(prev).add(chatId!));
-        }
-
         try {
           // Create new chat if this is the first message
           if (!chatId) {
             chatId = await createNewChat(content);
+            if (chatId) {
+              if (isImageRequest) {
+                setGeneratingChatIds(prev => new Set(prev).add(chatId!));
+              } else {
+                setTypingChatIds(prev => new Set(prev).add(chatId!));
+              }
+            }
           }
 
           // Save user message to Firestore
-          if (chatId) await sendMessageToFirestore(chatId, userMessage);
-
-          // ── Image Generation Detection ─────────────────────────────
-          const imageKeywords = /\b(generate|create|draw|make|produce|render|paint|design|illustrate|show me)\b.{0,40}\b(image|picture|photo|illustration|art|artwork|painting|drawing|portrait|landscape|wallpaper)\b/i;
-          const isImageRequest = imageKeywords.test(content) || /^(imagine|visualize|depict)\b/i.test(content);
+          if (chatId) {
+            if (historyLimit !== undefined) {
+              await deleteMessagesAfter(chatId, historyLimit, userMessage);
+            } else {
+              await sendMessageToFirestore(chatId, userMessage);
+            }
+          }
 
           if (isImageRequest && chatId) {
             // Show a loading placeholder in the chat
@@ -1126,44 +1138,91 @@ export function AnimatedAIChat() {
                               )}
                               <div className="text-sm leading-relaxed text-white/90">
                                 {msg.content === "__IMAGE_GENERATING__" ? (
-                                  <div className="w-full max-w-sm aspect-square rounded-[2.5rem] overflow-hidden relative border border-white/10 bg-[#0A0A0B] shadow-2xl group">
-                                    {/* Animated Background Gradients */}
-                                    <div className="absolute inset-0 bg-gradient-to-br from-violet-600/20 via-transparent to-fuchsia-600/20 opacity-50" />
-                                    <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-violet-500/10 via-transparent to-transparent" />
-                                    
-                                    {/* Moving Light Rays */}
-                                    <div className="absolute inset-0 overflow-hidden">
-                                      <div className="absolute -inset-[100%] opacity-30 animate-[spin_8s_linear_infinite] bg-[conic-gradient(from_0deg,transparent,rgba(139,92,246,0.3),transparent,rgba(217,70,239,0.3),transparent)]" />
-                                    </div>
+                                  <div className="w-full max-w-lg rounded-[2rem] overflow-hidden relative border border-white/[0.07] bg-[#060608] shadow-[0_0_60px_rgba(139,92,246,0.12)]">
+                                    {/* Pixel Grid Canvas */}
+                                    <div className="relative w-full aspect-[4/3] flex flex-col items-center justify-center gap-6 p-8">
 
-                                    {/* Glassmorphic Overlay */}
-                                    <div className="absolute inset-0 backdrop-blur-[2px]" />
+                                      {/* Animated pixel grid */}
+                                      <div className="absolute inset-0 grid"
+                                        style={{ gridTemplateColumns: "repeat(16, 1fr)", gridTemplateRows: "repeat(12, 1fr)" }}
+                                      >
+                                        {Array.from({ length: 192 }).map((_, i) => (
+                                          <motion.div
+                                            key={i}
+                                            className="border-[0.5px] border-white/[0.03]"
+                                            animate={{
+                                              backgroundColor: [
+                                                "rgba(0,0,0,0)",
+                                                `hsl(${260 + (i % 60)}deg, 70%, ${20 + (i % 20)}%)`,
+                                                "rgba(0,0,0,0)"
+                                              ],
+                                            }}
+                                            transition={{
+                                              duration: 2.5,
+                                              repeat: Infinity,
+                                              delay: (i * 0.013) % 2.5,
+                                              ease: "easeInOut",
+                                            }}
+                                          />
+                                        ))}
+                                      </div>
 
-                                    {/* Content */}
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 z-10">
-                                      <div className="relative">
-                                        <div className="w-20 h-20 rounded-full border border-white/10 flex items-center justify-center bg-white/5 backdrop-blur-xl">
-                                          <div className="w-12 h-12 rounded-full border-2 border-violet-500/30 border-t-violet-400 animate-spin" />
+                                      {/* Dark overlay so the grid doesn't overpower */}
+                                      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+
+                                      {/* Center content */}
+                                      <div className="relative z-10 flex flex-col items-center gap-5">
+                                        {/* Waveform bars */}
+                                        <div className="flex items-end gap-[3px] h-10">
+                                          {[0.4, 0.7, 1, 0.8, 0.5, 0.9, 0.6, 1, 0.75, 0.45, 0.85, 0.6].map((h, i) => (
+                                            <motion.div
+                                              key={i}
+                                              className="w-[3px] rounded-full bg-gradient-to-t from-violet-600 to-fuchsia-400"
+                                              style={{ height: `${h * 100}%` }}
+                                              animate={{ scaleY: [0.3, 1, 0.3] }}
+                                              transition={{
+                                                duration: 1.2,
+                                                repeat: Infinity,
+                                                delay: i * 0.08,
+                                                ease: "easeInOut",
+                                              }}
+                                            />
+                                          ))}
                                         </div>
-                                        <div className="absolute -inset-4 bg-violet-500/20 blur-2xl rounded-full animate-pulse -z-10" />
+
+                                        {/* Label */}
+                                        <div className="flex flex-col items-center gap-1">
+                                          <motion.p
+                                            className="text-[13px] font-semibold text-white/80 tracking-widest uppercase"
+                                            animate={{ opacity: [0.4, 1, 0.4] }}
+                                            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                                          >
+                                            Generating Image
+                                          </motion.p>
+                                          <p className="text-[10px] text-white/25 tracking-[0.4em] uppercase font-medium">
+                                            Please wait…
+                                          </p>
+                                        </div>
                                       </div>
-                                      
-                                      <div className="text-center space-y-1">
-                                        <span className="block text-sm font-medium text-white/90 tracking-tight">Creating your masterpiece</span>
-                                        <span className="block text-[10px] text-violet-400/60 uppercase tracking-[0.2em] font-bold animate-pulse">Afs Vision Engine</span>
+
+                                      {/* Progress bar at bottom */}
+                                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/5">
+                                        <motion.div
+                                          className="h-full bg-gradient-to-r from-violet-500 via-fuchsia-400 to-blue-500"
+                                          animate={{ x: ["-100%", "100%"] }}
+                                          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                                        />
                                       </div>
                                     </div>
-
-                                    {/* Scanning Line Effect */}
-                                    <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-violet-400 to-transparent animate-[scan_3s_ease-in-out_infinite] shadow-[0_0_15px_rgba(139,92,246,0.5)]" />
                                   </div>
+
                                 ) : msg.content.startsWith("__IMAGE__:") ? (
-                                  <div className="w-full max-w-sm rounded-2xl overflow-hidden border border-white/10 shadow-[0_0_30px_rgba(139,92,246,0.2)] group/img relative">
+                                  <div className="w-full max-w-lg aspect-[4/3] rounded-[2rem] overflow-hidden border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.3)] group/img relative bg-[#050505]">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                       src={msg.content.replace("__IMAGE__:", "")}
                                       alt="Generated image"
-                                      className="w-full h-auto object-cover"
+                                      className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-105"
                                     />
                                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-3">
                                       <button
@@ -1607,38 +1666,41 @@ function TypewriterText({ content, onComplete, isStopped }: { content: string, o
 
 function ThinkingLoader() {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex items-center gap-1">
+    <div className="flex items-center gap-5 px-2">
+      <div className="flex items-center gap-2">
         {[0, 1, 2].map((i) => (
           <motion.div
             key={i}
-            className="w-1.5 h-1.5 bg-violet-400 rounded-full"
+            className="w-2 h-2 bg-gradient-to-t from-violet-500 to-fuchsia-400 rounded-full shadow-[0_0_10px_rgba(139,92,246,0.3)]"
             animate={{
-              scale: [1, 1.5, 1],
+              y: [0, -8, 0],
               opacity: [0.3, 1, 0.3],
+              scale: [1, 1.25, 1],
             }}
             transition={{
-              duration: 0.8,
+              duration: 1.2,
               repeat: Infinity,
-              delay: i * 0.15,
+              delay: i * 0.2,
               ease: "easeInOut",
             }}
           />
         ))}
       </div>
-      <motion.span
-        className="text-[10px] font-bold uppercase tracking-[0.3em] bg-clip-text text-transparent bg-gradient-to-r from-white/40 via-white to-white/40 bg-[length:200%_auto]"
-        animate={{
-          backgroundPosition: ["200% center", "-200% center"],
-        }}
-        transition={{
-          duration: 1.5,
-          repeat: Infinity,
-          ease: "linear",
-        }}
-      >
-        Thinking...
-      </motion.span>
+      <div className="flex flex-col">
+        <motion.span
+          className="text-[11px] font-black uppercase tracking-[0.2em] bg-clip-text text-transparent bg-gradient-to-r from-violet-400 via-white to-fuchsia-400 bg-[length:200%_auto]"
+          animate={{
+            backgroundPosition: ["200% center", "-200% center"],
+          }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: "linear",
+          }}
+        >
+          Thinking
+        </motion.span>
+      </div>
     </div>
   );
 }
