@@ -17,6 +17,8 @@ import {
     Mic,
     MicOff,
     Volume2,
+    FileText,
+    X,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -174,6 +176,12 @@ export function AnimatedAIChat() {
     const [isDragging, setIsDragging] = useState(false);
     const commandPaletteRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    // ── RAG state ────────────────────────────────────────────────────────────
+    const [ragSessionId, setRagSessionId] = useState<string | null>(null);
+    const [ragFileName, setRagFileName] = useState<string | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -339,44 +347,49 @@ export function AnimatedAIChat() {
                     // Save user message to Firestore
                     await sendMessageToFirestore(chatId, userMessage);
 
-                    const provider = localStorage.getItem("afs-provider");
-                    const model = localStorage.getItem("afs-model");
-                    const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
-                    const apiKey = provider ? keys[provider] : "";
+                    let responseContent: string;
 
-                    const response = await fetch("/api/chat", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            messages: currentMessages,
-                            provider,
-                            model,
-                            apiKey
-                        })
-                    });
-
-                    const data = await response.json();
-                    
-                    if (data.error) {
-                        const errorMessage: any = {
-                            role: "assistant",
-                            content: `Error: ${data.error}`,
-                            timestamp: new Date(),
-                        };
-                        setMessages(prev => [...prev, errorMessage]);
-                        setIsTyping(false);
+                    if (ragSessionId) {
+                        // ── RAG mode: query the document ──────────────────
+                        const ragRes = await fetch("/api/rag/query", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ session_id: ragSessionId, question: content }),
+                        });
+                        const ragData = await ragRes.json();
+                        if (!ragRes.ok) {
+                            responseContent = `❌ RAG Error: ${ragData.detail || "Unknown error"}`;
+                        } else {
+                            responseContent = ragData.answer;
+                        }
                     } else {
-                        const aiMessage: any = {
-                            role: "assistant",
-                            content: data.content,
-                            timestamp: new Date(),
-                        };
-                        setMessages(prev => [...prev, aiMessage]);
-                        setIsTyping(false);
-                        
-                        // Save assistant message to Firestore
-                        await sendMessageToFirestore(chatId, aiMessage);
+                        // ── Normal AI chat mode ───────────────────────────
+                        const provider = localStorage.getItem("afs-provider");
+                        const model = localStorage.getItem("afs-model");
+                        const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+                        const apiKey = provider ? keys[provider] : "";
+
+                        const response = await fetch("/api/chat", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ messages: currentMessages, provider, model, apiKey }),
+                        });
+                        const data = await response.json();
+                        if (data.error) {
+                            responseContent = `Error: ${data.error}`;
+                        } else {
+                            responseContent = data.content;
+                        }
                     }
+
+                    const aiMessage: any = {
+                        role: "assistant",
+                        content: responseContent,
+                        timestamp: new Date(),
+                    };
+                    setMessages(prev => [...prev, aiMessage]);
+                    setIsTyping(false);
+                    await sendMessageToFirestore(chatId, aiMessage);
                 } catch (error) {
                     console.error("Chat error:", error);
                     const errorMessage: any = {
@@ -391,10 +404,76 @@ export function AnimatedAIChat() {
         }
     };
 
+    const uploadFileToRAG = async (file: File) => {
+        const allowed = [".pdf", ".txt", ".csv", ".xlsx", ".xls"];
+        const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+        if (!allowed.includes(ext)) {
+            const errMsg: any = {
+                role: "assistant",
+                content: `⚠️ Unsupported file type **${ext}**. Please upload a PDF, TXT, CSV, or XLSX file.`,
+                timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errMsg]);
+            setIsChatMode(true);
+            return;
+        }
+
+        setIsUploading(true);
+        const notice: any = {
+            role: "assistant",
+            content: `📂 Analyzing **${file.name}**… Please wait.`,
+            timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, notice]);
+        setIsChatMode(true);
+
+        try {
+            const form = new FormData();
+            form.append("file", file);
+
+            const res = await fetch("/api/rag/upload", { method: "POST", body: form });
+            const data = await res.json();
+
+            if (!res.ok) {
+                setMessages(prev => [...prev, {
+                    role: "assistant",
+                    content: `❌ Upload failed: ${data.detail || "Unknown error"}`,
+                    timestamp: new Date(),
+                } as any]);
+            } else {
+                setRagSessionId(data.session_id);
+                setRagFileName(file.name);
+                setMessages(prev => [...prev, {
+                    role: "assistant",
+                    content: `✅ **${file.name}** is ready! Ask me anything about this document.`,
+                    timestamp: new Date(),
+                } as any]);
+            }
+        } catch (err: any) {
+            setMessages(prev => [...prev, {
+                role: "assistant",
+                content: `❌ Could not reach the RAG server. Make sure it's running on port 8001.`,
+                timestamp: new Date(),
+            } as any]);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const handleAttachFile = () => {
-        // Mock file attachment for now
-        const mockFileName = `file-${Math.floor(Math.random() * 1000)}.pdf`;
-        setAttachments(prev => [...prev, mockFileName]);
+        fileInputRef.current?.click();
+    };
+
+    const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) uploadFileToRAG(file);
+        // reset so the same file can be re-selected
+        e.target.value = "";
+    };
+
+    const clearRagSession = () => {
+        setRagSessionId(null);
+        setRagFileName(null);
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -413,12 +492,8 @@ export function AnimatedAIChat() {
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
-        
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length > 0) {
-            const fileNames = files.map(file => file.name);
-            setAttachments(prev => [...prev, ...fileNames]);
-        }
+        const file = e.dataTransfer.files?.[0];
+        if (file) uploadFileToRAG(file);
     };
 
     const removeAttachment = (index: number) => {
@@ -489,6 +564,14 @@ export function AnimatedAIChat() {
     return (
         <>
         <VoiceCallModal isOpen={isCallOpen} onClose={() => setIsCallOpen(false)} />
+        {/* Hidden real file input */}
+        <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.txt,.csv,.xlsx,.xls"
+            className="hidden"
+            onChange={handleFileInputChange}
+        />
         <div 
             className="h-screen w-full bg-transparent text-white relative overflow-hidden flex flex-col"
             onDragOver={handleDragOver}
@@ -505,10 +588,10 @@ export function AnimatedAIChat() {
                         className="absolute inset-0 z-[100] bg-violet-500/10 backdrop-blur-sm border-2 border-dashed border-violet-500/50 flex flex-col items-center justify-center gap-4 rounded-3xl m-4"
                     >
                         <div className="w-20 h-20 bg-violet-500/20 rounded-full flex items-center justify-center animate-bounce">
-                            <PlusIcon className="w-10 h-10 text-violet-400" />
+                            <FileText className="w-10 h-10 text-violet-400" />
                         </div>
-                        <h3 className="text-2xl font-bold text-violet-300 tracking-tight">Drop files here to attach</h3>
-                        <p className="text-violet-400/60 font-medium">Supports PDFs, images, and text files</p>
+                        <h3 className="text-2xl font-bold text-violet-300 tracking-tight">Drop document to analyze</h3>
+                        <p className="text-violet-400/60 font-medium">Supports PDF, TXT, CSV, XLSX</p>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -821,11 +904,40 @@ export function AnimatedAIChat() {
 
                 <div className="px-5 pb-5 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
+                        {/* RAG active badge */}
+                        <AnimatePresence>
+                            {ragFileName && (
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.85, x: -10 }}
+                                    animate={{ opacity: 1, scale: 1, x: 0 }}
+                                    exit={{ opacity: 0, scale: 0.85, x: -10 }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/15 border border-violet-500/30 rounded-xl text-xs text-violet-300 max-w-[160px]"
+                                >
+                                    <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                    <span className="truncate">{ragFileName}</span>
+                                    <button
+                                        onClick={clearRagSession}
+                                        className="ml-0.5 text-violet-400/60 hover:text-red-400 transition-colors flex-shrink-0"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                         <motion.button
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
                             onClick={handleAttachFile}
-                            className="p-2.5 text-white/30 hover:text-white/90 rounded-xl hover:bg-white/5 transition-colors"
+                            disabled={isUploading}
+                            title="Attach document for RAG analysis"
+                            className={cn(
+                                "p-2.5 rounded-xl transition-colors",
+                                isUploading
+                                    ? "text-violet-400 animate-pulse cursor-wait"
+                                    : ragFileName
+                                    ? "text-violet-400 bg-violet-500/10"
+                                    : "text-white/30 hover:text-white/90 hover:bg-white/5"
+                            )}
                         >
                             <Paperclip className="w-5 h-5" />
                         </motion.button>

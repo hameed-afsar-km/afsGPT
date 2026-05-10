@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AfsGPT — Document RAG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0b0f1a;
+    --surface: rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.08);
+    --accent: #6c63ff;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --red: #f87171;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --radius: 16px;
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    background-image:
+      radial-gradient(ellipse at 20% 20%, rgba(108,99,255,0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(167,139,250,0.10) 0%, transparent 50%);
+  }
+
+  /* ── Header ── */
+  header { text-align: center; margin-bottom: 40px; }
+  header h1 {
+    font-size: 2.4rem; font-weight: 700;
+    background: linear-gradient(135deg, #6c63ff, #a78bfa, #38bdf8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+  header p { color: var(--muted); margin-top: 8px; font-size: 0.95rem; }
+
+  /* ── Main card ── */
+  .card {
+    width: 100%; max-width: 780px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    backdrop-filter: blur(12px);
+    margin-bottom: 24px;
+  }
+
+  /* ── Drop zone ── */
+  #drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 52px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.25s, background 0.25s;
+    position: relative;
+  }
+  #drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(108,99,255,0.07);
+  }
+  #drop-zone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  }
+  .drop-icon { font-size: 3rem; margin-bottom: 12px; }
+  #drop-zone h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
+  #drop-zone p  { color: var(--muted); font-size: 0.85rem; }
+
+  /* ── Status badge ── */
+  #status-bar {
+    margin-top: 18px; padding: 12px 16px;
+    border-radius: 10px; font-size: 0.875rem;
+    display: none; align-items: center; gap: 10px;
+    border: 1px solid var(--border);
+  }
+  #status-bar.info    { background: rgba(108,99,255,0.12); border-color: rgba(108,99,255,0.3); }
+  #status-bar.success { background: rgba(52,211,153,0.10); border-color: rgba(52,211,153,0.3); color: var(--green); }
+  #status-bar.error   { background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.3); color: var(--red); }
+
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid var(--accent2);
+    border-top-color: transparent; border-radius: 50%;
+    animation: spin 0.7s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Chat area ── */
+  #chat-section { display: none; }
+  #chat-section h2 {
+    font-size: 1rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 16px;
+  }
+
+  #messages {
+    min-height: 200px; max-height: 420px;
+    overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+    margin-bottom: 20px; padding-right: 4px;
+  }
+  #messages::-webkit-scrollbar { width: 4px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .msg {
+    display: flex; gap: 10px; align-items: flex-start;
+    animation: fadeUp 0.3s ease forwards;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .msg.user  { flex-direction: row-reverse; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 700; flex-shrink: 0;
+  }
+  .msg.user  .avatar { background: linear-gradient(135deg, #6c63ff, #a78bfa); }
+  .msg.ai    .avatar { background: linear-gradient(135deg, #0f172a, #1e293b); border: 1px solid var(--border); }
+  .bubble {
+    max-width: 75%; padding: 12px 16px; border-radius: 12px;
+    font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;
+  }
+  .msg.user .bubble {
+    background: linear-gradient(135deg, #6c63ff22, #a78bfa22);
+    border: 1px solid rgba(108,99,255,0.25);
+    border-top-right-radius: 4px;
+  }
+  .msg.ai .bubble {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top-left-radius: 4px;
+  }
+  .thinking-dots span {
+    display: inline-block; animation: blink 1.2s infinite;
+  }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
+
+  /* ── Input row ── */
+  .input-row { display: flex; gap: 10px; }
+  #question-input {
+    flex: 1; background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font-family: inherit; font-size: 0.9rem;
+    padding: 12px 16px; outline: none; resize: none; height: 48px;
+    transition: border-color 0.2s;
+  }
+  #question-input:focus { border-color: var(--accent); }
+  #question-input::placeholder { color: var(--muted); }
+
+  #ask-btn {
+    background: linear-gradient(135deg, #6c63ff, #a78bfa);
+    border: none; border-radius: 10px; color: #fff;
+    font-family: inherit; font-size: 0.9rem; font-weight: 600;
+    padding: 0 22px; cursor: pointer;
+    transition: opacity 0.2s, transform 0.15s;
+    white-space: nowrap;
+  }
+  #ask-btn:hover  { opacity: 0.88; transform: translateY(-1px); }
+  #ask-btn:active { transform: translateY(0); }
+  #ask-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Clear btn ── */
+  #clear-btn {
+    margin-top: 14px; background: transparent;
+    border: 1px solid var(--border); border-radius: 8px;
+    color: var(--muted); font-family: inherit; font-size: 0.8rem;
+    padding: 7px 14px; cursor: pointer; transition: border-color 0.2s, color 0.2s;
+  }
+  #clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+  .file-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25);
+    border-radius: 20px; padding: 4px 12px; font-size: 0.8rem; color: var(--green);
+    margin-bottom: 16px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ AfsGPT RAG</h1>
+  <p>Drop a document — ask anything about it.</p>
+</header>
+
+<!-- Upload Card -->
+<div class="card">
+  <div id="drop-zone">
+    <input type="file" id="file-input" accept=".txt,.pdf,.csv,.xlsx,.xls"/>
+    <div class="drop-icon">📂</div>
+    <h3>Drag & Drop your file here</h3>
+    <p>Supports PDF, TXT, CSV, XLSX — or click to browse</p>
+  </div>
+  <div id="status-bar">
+    <div class="spinner" id="spinner" style="display:none"></div>
+    <span id="status-text"></span>
+  </div>
+</div>
+
+<!-- Chat Card -->
+<div class="card" id="chat-section">
+  <div id="file-chip-wrap"></div>
+  <h2>💬 Ask your document</h2>
+  <div id="messages"></div>
+  <div class="input-row">
+    <textarea id="question-input" placeholder="Ask a question about the document…" rows="1"></textarea>
+    <button id="ask-btn">Ask →</button>
+  </div>
+  <button id="clear-btn">🗑 Clear & Upload New File</button>
+</div>
+
+<script>
+  const dropZone     = document.getElementById('drop-zone');
+  const fileInput    = document.getElementById('file-input');
+  const statusBar    = document.getElementById('status-bar');
+  const statusText   = document.getElementById('status-text');
+  const spinner      = document.getElementById('spinner');
+  const chatSection  = document.getElementById('chat-section');
+  const messages     = document.getElementById('messages');
+  const questionInput= document.getElementById('question-input');
+  const askBtn       = document.getElementById('ask-btn');
+  const clearBtn     = document.getElementById('clear-btn');
+  const fileChipWrap = document.getElementById('file-chip-wrap');
+
+  let sessionId = null;
+
+  // ── Drag events ──────────────────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', ()=> dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  // ── Upload ───────────────────────────────────────────────────────────────
+  async function handleFile(file) {
+    showStatus('info', `Uploading "${file.name}"…`, true);
+
+    const form = new FormData();
+    form.append('file', file);
+
+    try {
+      const res  = await fetch('/upload', { method: 'POST', body: form });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showStatus('error', `❌ ${data.detail || 'Upload failed.'}`);
+        return;
+      }
+
+      sessionId = data.session_id;
+      showStatus('success', `✅ "${file.name}" indexed — ask your questions below.`);
+
+      fileChipWrap.innerHTML = `<div class="file-chip">📄 ${file.name}</div>`;
+      chatSection.style.display = 'block';
+      messages.innerHTML = '';
+      questionInput.focus();
+
+    } catch (err) {
+      showStatus('error', `❌ Network error: ${err.message}`);
+    }
+  }
+
+  // ── Query ────────────────────────────────────────────────────────────────
+  askBtn.addEventListener('click', sendQuestion);
+  questionInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion(); }
+  });
+
+  async function sendQuestion() {
+    const q = questionInput.value.trim();
+    if (!q || !sessionId) return;
+
+    appendMsg('user', q);
+    questionInput.value = '';
+    askBtn.disabled = true;
+
+    const thinkingId = appendThinking();
+
+    try {
+      const res  = await fetch('/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, question: q })
+      });
+      const data = await res.json();
+      removeMsg(thinkingId);
+
+      if (!res.ok) {
+        appendMsg('ai', `⚠️ ${data.detail || 'Something went wrong.'}`);
+      } else {
+        appendMsg('ai', data.answer);
+      }
+    } catch (err) {
+      removeMsg(thinkingId);
+      appendMsg('ai', `⚠️ Network error: ${err.message}`);
+    } finally {
+      askBtn.disabled = false;
+      questionInput.focus();
+    }
+  }
+
+  // ── Clear ────────────────────────────────────────────────────────────────
+  clearBtn.addEventListener('click', async () => {
+    if (sessionId) {
+      await fetch('/clear', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      }).catch(() => {});
+      sessionId = null;
+    }
+    chatSection.style.display = 'none';
+    fileChipWrap.innerHTML = '';
+    messages.innerHTML = '';
+    statusBar.style.display = 'none';
+    fileInput.value = '';
+  });
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function showStatus(type, text, loading = false) {
+    statusBar.className = type;
+    statusBar.style.display = 'flex';
+    spinner.style.display = loading ? 'block' : 'none';
+    statusText.textContent = text;
+  }
+
+  function appendMsg(role, text) {
+    const id  = 'msg-' + Date.now();
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.id = id;
+    div.innerHTML = `
+      <div class="avatar">${role === 'user' ? 'You' : 'AI'}</div>
+      <div class="bubble">${escHtml(text)}</div>`;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return id;
+  }
+
+  function appendThinking() {
+    const id  = 'thinking-' + Date.now();
+    const div = document.createElement('div');
+    div.className = 'msg ai'; div.id = id;
+    div.innerHTML = `
+      <div class="avatar">AI</div>
+      <div class="bubble thinking-dots"><span>●</span><span>●</span><span>●</span></div>`;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return id;
+  }
+
+  function removeMsg(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  }
+</script>
+</body>
+</html>

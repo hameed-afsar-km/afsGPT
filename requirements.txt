@@ -1,5 +1,13 @@
 SpeechRecognition>=3.16.1
 pyttsx3==2.90
 PyAudio==0.2.14
-mlx-lm
 langchain_ollama
+langchain_chroma
+langchain_community
+langchain
+fastapi
+uvicorn[standard]
+python-multipart
+pypdf
+pandas
+openpyxl
