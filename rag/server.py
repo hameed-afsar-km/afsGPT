@@ -14,10 +14,11 @@ import uuid
 import shutil
 import logging
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from typing import Optional
 
 # Allow sibling imports (vector, rag_chain live in same dir)
 sys.path.insert(0, os.path.dirname(__file__))
@@ -50,7 +51,7 @@ class ClearRequest(BaseModel):
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), session_id: Optional[str] = Form(None)):
     """
     Receive an uploaded file, save it temporarily,
     ingest into a unique ChromaDB collection, return a session_id.
@@ -62,8 +63,9 @@ async def upload_file(file: UploadFile = File(...)):
             detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXT)}"
         )
 
-    session_id  = str(uuid.uuid4())
-    save_path   = os.path.join(UPLOAD_DIR, f"{session_id}{ext}")
+    if not session_id:
+        session_id  = str(uuid.uuid4())
+    save_path   = os.path.join(UPLOAD_DIR, f"{session_id}_{file.filename}")
 
     # Save uploaded file to disk
     with open(save_path, "wb") as f:
