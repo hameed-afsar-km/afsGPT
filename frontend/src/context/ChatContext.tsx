@@ -18,6 +18,7 @@ interface Message {
     role: "user" | "assistant";
     content: string;
     timestamp: any;
+    attachments?: string[];
 }
 
 interface ChatContextType {
@@ -61,18 +62,45 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const createNewChat = async (firstMessage: string) => {
         if (!user) throw new Error("User must be logged in");
 
-        const title = firstMessage.length > 40 
-            ? firstMessage.substring(0, 40) + "..." 
-            : firstMessage;
+        const tempTitle = "New Chat...";
 
         const chatRef = await addDoc(collection(db, `users/${user.uid}/chats`), {
-            title,
+            title: tempTitle,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
 
         setActiveChatId(chatRef.id);
+        
+        // Asynchronously generate title
+        generateAndSetTitle(chatRef.id, firstMessage);
+
         return chatRef.id;
+    };
+
+    const generateAndSetTitle = async (chatId: string, firstMessage: string) => {
+        try {
+            const provider = localStorage.getItem("afs-provider");
+            const model = localStorage.getItem("afs-model");
+            const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+            const apiKey = provider ? keys[provider] : "";
+
+            const response = await fetch("/api/chat/title", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: firstMessage, provider, model, apiKey }),
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.title) {
+                    await updateDoc(doc(db, `users/${user.uid}/chats`, chatId), {
+                        title: data.title
+                    });
+                }
+            }
+        } catch (error) {
+            console.error("Failed to generate title", error);
+        }
     };
 
     const sendMessageToFirestore = async (chatId: string, message: Message) => {

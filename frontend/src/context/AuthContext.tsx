@@ -34,7 +34,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const login = async () => {
         try {
             await signInWithPopup(auth, googleProvider);
-        } catch (error) {
+        } catch (error: any) {
+            if (error.code === 'auth/popup-closed-by-user') {
+                // User intentionally closed the popup, no need to log it as an error
+                return;
+            }
             console.error("Login failed:", error);
         }
     };

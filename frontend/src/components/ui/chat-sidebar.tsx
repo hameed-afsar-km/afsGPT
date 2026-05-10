@@ -31,6 +31,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { SettingsDialog } from "./settings-dialog";
+import { ConfirmModal } from "./confirm-modal";
 
 interface ChatHistoryItem {
     id: string;
@@ -57,6 +58,7 @@ export function ChatSidebar() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editValue, setEditValue] = useState("");
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [chatToDelete, setChatToDelete] = useState<string | null>(null);
 
     useEffect(() => {
         if (!user) {
@@ -92,15 +94,20 @@ export function ChatSidebar() {
         setActiveChatId(null);
     };
 
-    const handleDelete = async (id: string) => {
-        if (!user) return;
+    const confirmDelete = async () => {
+        if (!user || !chatToDelete) return;
         try {
-            await deleteDoc(doc(db, `users/${user.uid}/chats`, id));
-            if (activeChatId === id) setActiveChatId(null);
-            setMenuOpenId(null);
+            await deleteDoc(doc(db, `users/${user.uid}/chats`, chatToDelete));
+            if (activeChatId === chatToDelete) setActiveChatId(null);
+            setChatToDelete(null);
         } catch (error) {
             console.error("Error deleting chat:", error);
         }
+    };
+
+    const handleDelete = (id: string) => {
+        setChatToDelete(id);
+        setMenuOpenId(null);
     };
 
     const startEditing = (item: ChatHistoryItem) => {
@@ -325,6 +332,16 @@ export function ChatSidebar() {
             )}
 
             <SettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+            
+            <ConfirmModal
+                isOpen={chatToDelete !== null}
+                onClose={() => setChatToDelete(null)}
+                onConfirm={confirmDelete}
+                title="Delete Chat"
+                description="Are you sure you want to delete this chat? This action cannot be undone."
+                confirmText="Delete Chat"
+                isDestructive={true}
+            />
         </>
     );
 }

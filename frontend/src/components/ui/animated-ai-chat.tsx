@@ -180,6 +180,7 @@ export function AnimatedAIChat() {
     // ── RAG state ────────────────────────────────────────────────────────────
     const [ragSessionId, setRagSessionId] = useState<string | null>(null);
     const [ragFileName, setRagFileName] = useState<string | null>(null);
+    const [fileAttachedToNextMessage, setFileAttachedToNextMessage] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -324,7 +325,13 @@ export function AnimatedAIChat() {
                 role: "user",
                 content: content,
                 timestamp: new Date(),
+                attachments: fileAttachedToNextMessage ? [fileAttachedToNextMessage] : [],
             };
+            
+            // Clear the attachment after it's added to the message
+            if (fileAttachedToNextMessage) {
+                setFileAttachedToNextMessage(null);
+            }
 
             const currentMessages = [...messages, userMessage];
             setMessages(currentMessages);
@@ -419,13 +426,6 @@ export function AnimatedAIChat() {
         }
 
         setIsUploading(true);
-        const notice: any = {
-            role: "assistant",
-            content: `📂 Analyzing **${file.name}**… Please wait.`,
-            timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, notice]);
-        setIsChatMode(true);
 
         try {
             const form = new FormData();
@@ -435,26 +435,26 @@ export function AnimatedAIChat() {
             const data = await res.json();
 
             if (!res.ok) {
-                setMessages(prev => [...prev, {
+                const errMsg: any = {
                     role: "assistant",
                     content: `❌ Upload failed: ${data.detail || "Unknown error"}`,
                     timestamp: new Date(),
-                } as any]);
+                };
+                setMessages(prev => [...prev, errMsg]);
+                setIsChatMode(true);
             } else {
                 setRagSessionId(data.session_id);
                 setRagFileName(file.name);
-                setMessages(prev => [...prev, {
-                    role: "assistant",
-                    content: `✅ **${file.name}** is ready! Ask me anything about this document.`,
-                    timestamp: new Date(),
-                } as any]);
+                setFileAttachedToNextMessage(file.name);
             }
         } catch (err: any) {
-            setMessages(prev => [...prev, {
+            const errMsg: any = {
                 role: "assistant",
                 content: `❌ Could not reach the RAG server. Make sure it's running on port 8001.`,
                 timestamp: new Date(),
-            } as any]);
+            };
+            setMessages(prev => [...prev, errMsg]);
+            setIsChatMode(true);
         } finally {
             setIsUploading(false);
         }
@@ -474,6 +474,7 @@ export function AnimatedAIChat() {
     const clearRagSession = () => {
         setRagSessionId(null);
         setRagFileName(null);
+        setFileAttachedToNextMessage(null);
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -709,6 +710,16 @@ export function AnimatedAIChat() {
                                                 ? "bg-white/[0.08] border-white/[0.1] text-white/90 rounded-tr-none ml-16" 
                                                 : "bg-white/[0.03] border-white/[0.05] text-white/80 rounded-tl-none mr-16"
                                         )}>
+                                            {msg.attachments && msg.attachments.length > 0 && (
+                                                <div className="flex flex-col gap-2 mb-3">
+                                                    {msg.attachments.map((att: string, i: number) => (
+                                                        <div key={i} className="flex items-center gap-2 bg-white/10 px-3 py-2 rounded-xl border border-white/20 w-fit">
+                                                            <FileText className="w-4 h-4 text-violet-300" />
+                                                            <span className="text-xs text-white/90 font-medium">{att}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                             {msg.role === "assistant" && (
                                                 <div className="flex items-center justify-between mb-3">
                                                     <div className="flex items-center gap-2">
@@ -906,21 +917,29 @@ export function AnimatedAIChat() {
                     <div className="flex items-center gap-2">
                         {/* RAG active badge */}
                         <AnimatePresence>
-                            {ragFileName && (
+                            {(ragFileName || isUploading) && (
                                 <motion.div
                                     initial={{ opacity: 0, scale: 0.85, x: -10 }}
                                     animate={{ opacity: 1, scale: 1, x: 0 }}
                                     exit={{ opacity: 0, scale: 0.85, x: -10 }}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/15 border border-violet-500/30 rounded-xl text-xs text-violet-300 max-w-[160px]"
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-violet-500/15 border border-violet-500/30 rounded-xl text-xs text-violet-300 max-w-[200px]"
                                 >
-                                    <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                    <span className="truncate">{ragFileName}</span>
-                                    <button
-                                        onClick={clearRagSession}
-                                        className="ml-0.5 text-violet-400/60 hover:text-red-400 transition-colors flex-shrink-0"
-                                    >
-                                        <X className="w-3 h-3" />
-                                    </button>
+                                    {isUploading ? (
+                                        <LoaderIcon className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+                                    ) : (
+                                        <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                    )}
+                                    <span className="truncate">
+                                        {isUploading ? `Analyzing...` : ragFileName}
+                                    </span>
+                                    {!isUploading && (
+                                        <button
+                                            onClick={clearRagSession}
+                                            className="ml-0.5 text-violet-400/60 hover:text-red-400 transition-colors flex-shrink-0"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    )}
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -933,7 +952,7 @@ export function AnimatedAIChat() {
                             className={cn(
                                 "p-2.5 rounded-xl transition-colors",
                                 isUploading
-                                    ? "text-violet-400 animate-pulse cursor-wait"
+                                    ? "text-violet-400 cursor-wait opacity-50"
                                     : ragFileName
                                     ? "text-violet-400 bg-violet-500/10"
                                     : "text-white/30 hover:text-white/90 hover:bg-white/5"
@@ -970,11 +989,11 @@ export function AnimatedAIChat() {
                     
                     <motion.button
                         onClick={() => handleSendMessage()}
-                        disabled={isTyping || !value.trim()}
+                        disabled={isTyping || !value.trim() || isUploading}
                         className={cn(
                             "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
                             "flex items-center gap-2",
-                            value.trim()
+                            value.trim() && !isUploading
                                 ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                                 : "bg-white/5 text-white/20"
                         )}

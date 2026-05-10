@@ -8,6 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { Key, Save, CheckCircle2 } from "lucide-react";
+import { ConfirmModal } from "./confirm-modal";
 
 interface SettingsDialogProps {
     isOpen: boolean;
@@ -23,6 +24,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
         anthropic: ""
     });
     const [saveStatus, setSaveStatus] = useState<string | null>(null);
+    const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false);
 
     useEffect(() => {
         const savedKeys = localStorage.getItem("afs-keys");
@@ -42,15 +44,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     };
 
     const handleSwitchAccount = async () => {
-        await logout();
         await login();
         onClose();
     };
 
     const clearHistory = async () => {
         if (!user) return;
-        if (!confirm("Are you sure you want to clear all chat history? This cannot be undone.")) return;
-
+        
         try {
             const q = collection(db, `users/${user.uid}/chats`);
             const snapshot = await getDocs(q);
@@ -125,7 +125,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                                                     <p className="text-xs text-white/40">Permanently delete your entire chat history</p>
                                                 </div>
                                                 <button 
-                                                    onClick={clearHistory}
+                                                    onClick={() => setIsClearHistoryModalOpen(true)}
                                                     className="px-4 py-2 bg-red-500/10 text-red-400 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors border border-red-500/20"
                                                 >
                                                     Clear history
@@ -222,6 +222,15 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                             </button>
                         </div>
                     </motion.div>
+                    <ConfirmModal
+                        isOpen={isClearHistoryModalOpen}
+                        onClose={() => setIsClearHistoryModalOpen(false)}
+                        onConfirm={clearHistory}
+                        title="Clear All Chat History"
+                        description="Are you absolutely sure you want to delete all your chat history? This action cannot be undone and will permanently remove all your data."
+                        confirmText="Clear Everything"
+                        isDestructive={true}
+                    />
                 </div>
             )}
         </AnimatePresence>
