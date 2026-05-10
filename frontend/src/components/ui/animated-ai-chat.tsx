@@ -20,6 +20,7 @@ import {
   FileText,
   X,
   Copy,
+  Check,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -27,6 +28,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useChat } from "@/context/ChatContext";
 
 interface UseAutoResizeTextareaProps {
@@ -832,11 +835,8 @@ export function AnimatedAIChat() {
                                       {children}
                                     </strong>
                                   ),
-                                  code: ({ children }) => (
-                                    <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono">
-                                      {children}
-                                    </code>
-                                  ),
+                                  pre: ({ children }) => <>{children}</>,
+                                  code: CodeBlock as any,
                                   ul: ({ children }) => (
                                     <ul className="list-disc ml-4 mb-2 space-y-1">
                                       {children}
@@ -1186,11 +1186,8 @@ function TypewriterText({ content }: { content: string }) {
             {children}
           </strong>
         ),
-        code: ({ children }) => (
-          <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono">
-            {children}
-          </code>
-        ),
+        pre: ({ children }) => <>{children}</>,
+        code: CodeBlock as any,
         ul: ({ children }) => (
           <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>
         ),
@@ -1281,4 +1278,56 @@ if (typeof document !== "undefined") {
   const style = document.createElement("style");
   style.innerHTML = rippleKeyframes;
   document.head.appendChild(style);
+}
+
+function CodeBlock({ className, children, ...props }: any) {
+  const [copied, setCopied] = useState(false);
+  const match = /language-(\w+)/.exec(className || "");
+  const isInline = !match && !String(children).includes('\n');
+
+  if (isInline) {
+    return (
+      <code className="bg-white/10 px-1.5 py-0.5 rounded text-violet-200 text-xs font-mono" {...props}>
+        {children}
+      </code>
+    );
+  }
+
+  const language = match ? match[1] : "text";
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(String(children).replace(/\n$/, ""));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="my-4 rounded-xl overflow-hidden border border-white/10 bg-[#0d0d0d] shadow-xl">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 border-b border-white/10">
+        <span className="text-xs font-mono text-white/50 lowercase">{language}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+        >
+          {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <div className="p-0 overflow-x-auto text-sm font-mono text-white/80 custom-scrollbar max-w-full">
+        <SyntaxHighlighter
+          language={language === "text" ? "javascript" : language}
+          style={vscDarkPlus}
+          PreTag="div"
+          customStyle={{
+            margin: 0,
+            background: "transparent",
+            padding: "1rem",
+          }}
+          wrapLongLines={true}
+        >
+          {String(children).replace(/\n$/, "")}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
 }
