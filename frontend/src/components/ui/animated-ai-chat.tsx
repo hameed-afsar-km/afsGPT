@@ -548,12 +548,12 @@ export function AnimatedAIChat() {
           if (chatId) {
             setTypingChatIds(prev => {
               const next = new Set(prev);
-              next.delete(chatId);
+              if (chatId) next.delete(chatId);
               return next;
             });
             setGeneratingChatIds(prev => {
               const next = new Set(prev);
-              next.delete(chatId);
+              if (chatId) next.delete(chatId);
               return next;
             });
           }
