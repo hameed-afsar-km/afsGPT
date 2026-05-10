@@ -107,3 +107,20 @@ def clear_collection(collection_name: str = "rag_store"):
         persist_directory=CHROMA_DIR,
     )
     db.delete_collection()
+
+def clear_all_collections():
+    """Wipe all documents from all collections."""
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        collections = client.list_collections()
+        for col in collections:
+            client.delete_collection(col.name)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to clear all collections via API: {e}")
+        # Fallback: remove the directory
+        import shutil
+        if os.path.exists(CHROMA_DIR):
+            shutil.rmtree(CHROMA_DIR, ignore_errors=True)
+

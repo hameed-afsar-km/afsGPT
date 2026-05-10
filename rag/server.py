@@ -25,7 +25,7 @@ from typing import Optional
 # Allow sibling imports (vector, rag_chain live in same dir)
 sys.path.insert(0, os.path.dirname(__file__))
 
-from vector import ingest_file, clear_collection
+from vector import ingest_file, clear_collection, clear_all_collections
 from rag_chain import query
 from image_gen import generate_image
 
@@ -65,6 +65,10 @@ class ClearRequest(BaseModel):
 
 class ImageGenRequest(BaseModel):
     prompt: str
+
+class ImageAnalyzeRequest(BaseModel):
+    image_base64: str
+    question: str = "Describe this image in detail."
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -149,6 +153,68 @@ async def clear_session(body: ClearRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return JSONResponse({"message": "Session cleared."})
+
+
+@app.post("/analyze-image")
+async def analyze_image(body: ImageAnalyzeRequest):
+    """Analyze an image using LLaVA via Ollama."""
+    if not body.image_base64.strip():
+        raise HTTPException(status_code=400, detail="Image data cannot be empty.")
+
+    import base64
+    import tempfile
+    import ollama
+
+    try:
+        # Decode base64 to a temp image file
+        header, _, data = body.image_base64.partition(",")
+        image_bytes = base64.b64decode(data if data else body.image_base64)
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(image_bytes)
+            tmp_path = tmp.name
+
+        response = ollama.chat(
+            model="llava",
+            messages=[
+                {
+                    "role": "user",
+                    "content": body.question,
+                    "images": [tmp_path]
+                }
+            ]
+        )
+
+        os.unlink(tmp_path)
+
+        answer = response["message"]["content"]
+        log.info("LLaVA analysis completed.")
+        return JSONResponse({"answer": answer})
+
+    except Exception as e:
+        log.error(f"LLaVA analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/clear-all")
+async def clear_all_sessions():
+    """Delete all documents in all collections."""
+    try:
+        clear_all_collections()
+        log.info("All collections cleared.")
+        
+        # Also clean up the uploads directory just in case
+        for f in os.listdir(UPLOAD_DIR):
+            file_path = os.path.join(UPLOAD_DIR, f)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+            except Exception as e:
+                log.error(f"Failed to delete {file_path}: {e}")
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return JSONResponse({"message": "All files cleared."})
 
 
 # ─── Static frontend ──────────────────────────────────────────────────────────

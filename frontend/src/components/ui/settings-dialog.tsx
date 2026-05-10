@@ -25,6 +25,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     });
     const [saveStatus, setSaveStatus] = useState<string | null>(null);
     const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false);
+    const [isClearFilesModalOpen, setIsClearFilesModalOpen] = useState(false);
 
     useEffect(() => {
         const savedKeys = localStorage.getItem("afs-keys");
@@ -64,6 +65,17 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             onClose();
         } catch (error) {
             console.error("Error clearing history:", error);
+        }
+    };
+
+    const clearFiles = async () => {
+        try {
+            const res = await fetch("/api/rag/clear-all", { method: "DELETE" });
+            if (!res.ok) throw new Error("Failed to clear files");
+            setIsClearFilesModalOpen(false);
+            // Optional: Show a success toast here if desired
+        } catch (error) {
+            console.error("Error clearing files:", error);
         }
     };
 
@@ -134,6 +146,18 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                                                     className="px-4 py-2 bg-red-500/10 text-red-400 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors border border-red-500/20"
                                                 >
                                                     Clear history
+                                                </button>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-sm text-white/90 font-medium">Clear uploaded files</p>
+                                                    <p className="text-xs text-white/40">Permanently delete all files from the vector database</p>
+                                                </div>
+                                                <button 
+                                                    onClick={() => setIsClearFilesModalOpen(true)}
+                                                    className="px-4 py-2 bg-red-500/10 text-red-400 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors border border-red-500/20"
+                                                >
+                                                    Clear files
                                                 </button>
                                             </div>
                                             <div className="flex items-center justify-between">
@@ -234,6 +258,15 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                         title="Clear All Chat History"
                         description="Are you absolutely sure you want to delete all your chat history? This action cannot be undone and will permanently remove all your data."
                         confirmText="Clear Everything"
+                        isDestructive={true}
+                    />
+                    <ConfirmModal
+                        isOpen={isClearFilesModalOpen}
+                        onClose={() => setIsClearFilesModalOpen(false)}
+                        onConfirm={clearFiles}
+                        title="Clear All Uploaded Files"
+                        description="Are you absolutely sure you want to delete all uploaded documents from the vector database? This action cannot be undone."
+                        confirmText="Clear Files"
                         isDestructive={true}
                     />
                 </div>

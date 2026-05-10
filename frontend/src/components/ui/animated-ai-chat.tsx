@@ -25,6 +25,7 @@ import {
   Pencil,
   AlertCircle,
   Square,
+  ImageIcon,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -221,6 +222,11 @@ export function AnimatedAIChat() {
   >([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Vision / LLaVA state ─────────────────────────────────────────────────
+  const [attachedImage, setAttachedImage] = useState<{ base64: string; name: string } | null>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -706,6 +712,65 @@ export function AnimatedAIChat() {
     fileInputRef.current?.click();
   };
 
+  const handleImageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      setAttachedImage({ base64, name: file.name });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const sendImageForAnalysis = async (question: string, imageBase64: string, imageName: string) => {
+    const userMessage: Message = {
+      role: "user",
+      content: `__IMAGE_UPLOAD__:${imageBase64}\n${question || "Describe this image in detail."}`,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setAttachedImage(null);
+    setValue("");
+    adjustHeight(true);
+    setIsChatMode(true);
+    setIsAnalyzingImage(true);
+
+    try {
+      const res = await fetch("/api/rag/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_base64: imageBase64,
+          question: question || "Describe this image in detail.",
+        }),
+      });
+
+      const data = await res.json();
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: data.answer || data.error || "No response from LLaVA.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      if (activeChatId) {
+        await sendMessageToFirestore(activeChatId, userMessage);
+        await sendMessageToFirestore(activeChatId, assistantMessage);
+      }
+    } catch (err) {
+      console.error("Image analysis error:", err);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Sorry, image analysis failed.", timestamp: new Date() },
+      ]);
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  };
+
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) uploadFilesToRAG(Array.from(files));
@@ -900,6 +965,14 @@ export function AnimatedAIChat() {
         accept=".pdf,.txt,.csv,.xlsx,.xls"
         className="hidden"
         onChange={handleFileInputChange}
+      />
+      {/* Hidden image input for LLaVA */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleImageInputChange}
       />
       <div
         className="h-screen w-full bg-transparent text-white relative overflow-hidden flex flex-col"
@@ -1239,7 +1312,25 @@ export function AnimatedAIChat() {
                                       </button>
                                     </div>
                                   </div>
-                                ) : msg.role === "assistant" &&
+                                ) : msg.role === "user" && msg.content.startsWith("__IMAGE_UPLOAD__:") ? (() => {
+                                    const withoutPrefix = msg.content.replace("__IMAGE_UPLOAD__:", "");
+                                    const newlineIdx = withoutPrefix.indexOf("\n");
+                                    const imgSrc = newlineIdx !== -1 ? withoutPrefix.slice(0, newlineIdx) : withoutPrefix;
+                                    const question = newlineIdx !== -1 ? withoutPrefix.slice(newlineIdx + 1) : "";
+                                    return (
+                                      <div className="flex flex-col gap-3">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                          src={imgSrc}
+                                          alt="Uploaded for analysis"
+                                          className="max-w-[260px] rounded-2xl border border-white/10 object-cover shadow-lg"
+                                        />
+                                        {question && (
+                                          <p className="text-sm text-white/90 font-light tracking-wide">{question}</p>
+                                        )}
+                                      </div>
+                                    );
+                                  })() : msg.role === "assistant" &&
                                 idx === messages.length - 1 && (msg as any).isNew ? (
                                   <TypewriterText 
                                     content={msg.content} 
@@ -1333,6 +1424,33 @@ export function AnimatedAIChat() {
                       </div>
                     </motion.div>
                   )}
+                  {isAnalyzingImage && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex justify-start"
+                    >
+                      <div className="bg-white/[0.03] border border-fuchsia-500/[0.15] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-3xl shadow-2xl ml-4 flex items-center gap-3">
+                        <div className="flex gap-1.5">
+                          {[0, 1, 2].map((i) => (
+                            <motion.div
+                              key={i}
+                              className="w-1.5 h-1.5 rounded-full bg-fuchsia-400"
+                              animate={{ y: [0, -6, 0], opacity: [0.5, 1, 0.5] }}
+                              transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.18, ease: "easeInOut" }}
+                            />
+                          ))}
+                        </div>
+                        <motion.span
+                          className="text-[11px] font-black uppercase tracking-[0.2em] bg-clip-text text-transparent bg-gradient-to-r from-fuchsia-400 via-white to-violet-400 bg-[length:200%_auto]"
+                          animate={{ backgroundPosition: ["200% center", "-200% center"] }}
+                          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                        >
+                          Analyzing Image
+                        </motion.span>
+                      </div>
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1409,6 +1527,37 @@ export function AnimatedAIChat() {
   function renderInputContent() {
     return (
       <>
+        {/* Attached Image Preview */}
+        <AnimatePresence>
+          {attachedImage && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="px-5 pt-4 pb-2 border-b border-white/[0.05] flex items-center gap-3"
+            >
+              <div className="relative group/img">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={attachedImage.base64}
+                  alt={attachedImage.name}
+                  className="h-14 w-14 rounded-xl object-cover border border-white/10"
+                />
+                <button
+                  onClick={() => setAttachedImage(null)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity"
+                >
+                  <XIcon className="w-2.5 h-2.5 text-white" />
+                </button>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-white/70 truncate max-w-[200px]">{attachedImage.name}</span>
+                <span className="text-[10px] text-violet-400/60 uppercase tracking-widest">Ready for LLaVA Analysis</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Analysis Status & Attachments Header */}
         {(fileAttachedToNextMessage.length > 0 || isUploading || ragFileName) && (
           <div className="px-5 pt-4 pb-2 border-b border-white/[0.05] flex items-center justify-between">
@@ -1562,17 +1711,38 @@ export function AnimatedAIChat() {
             >
               <Mic className="w-5 h-5" />
             </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => imageInputRef.current?.click()}
+              title="Upload image for LLaVA analysis"
+              className={cn(
+                "p-2.5 rounded-xl transition-colors",
+                attachedImage
+                  ? "text-fuchsia-400 bg-fuchsia-500/10 shadow-[0_0_10px_rgba(232,121,249,0.2)]"
+                  : "text-white/30 hover:text-fuchsia-400 hover:bg-fuchsia-500/10",
+              )}
+            >
+              <ImageIcon className="w-5 h-5" />
+            </motion.button>
             <div className="h-6 w-[1px] bg-white/10 mx-1" />
             <ProviderSelector />
           </div>
 
           <motion.button
-            onClick={() => isGenerating ? stopGeneration() : handleSendMessage()}
-            disabled={(!isGenerating && !value.trim()) || isUploading}
+            onClick={() => {
+              if (isGenerating) { stopGeneration(); return; }
+              if (attachedImage) {
+                sendImageForAnalysis(value.trim(), attachedImage.base64, attachedImage.name);
+              } else {
+                handleSendMessage();
+              }
+            }}
+            disabled={(!isGenerating && !value.trim() && !attachedImage) || isUploading || isAnalyzingImage}
             className={cn(
               "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
               "flex items-center gap-2",
-              (value.trim() || isTyping) && !isUploading
+              (value.trim() || isTyping || attachedImage) && !isUploading && !isAnalyzingImage
                 ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                 : "bg-white/5 text-white/20",
             )}

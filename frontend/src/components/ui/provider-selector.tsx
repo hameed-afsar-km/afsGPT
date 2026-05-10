@@ -46,7 +46,6 @@ export function ProviderSelector() {
     const [showApiKeyInput, setShowApiKeyInput] = useState(false);
     const [mounted, setMounted] = useState(false);
 
-    const dropdownRef = useRef<HTMLDivElement>(null);
 
     // Set mounted on client
     useEffect(() => {
@@ -73,19 +72,20 @@ export function ProviderSelector() {
         }
     }, [selectedProvider]);
 
-    const fetchModels = async () => {
-        if (!selectedProvider) return;
+    const fetchModels = async (providerId?: string) => {
+        const targetProvider = providerId || selectedProvider;
+        if (!targetProvider) return;
         
         setIsLoading(true);
         setError(null);
         
         const savedKeys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
-        const currentApiKey = savedKeys[selectedProvider] || "";
+        const currentApiKey = savedKeys[targetProvider] || "";
 
         try {
             const response = await fetch("/api/models", {
                 method: "POST",
-                body: JSON.stringify({ provider: selectedProvider, apiKey: currentApiKey }),
+                body: JSON.stringify({ provider: targetProvider, apiKey: currentApiKey }),
                 headers: { "Content-Type": "application/json" }
             });
 
@@ -99,7 +99,6 @@ export function ProviderSelector() {
                 if (data.models?.length > 0 && (!selectedModel || !data.models.includes(selectedModel))) {
                     const firstModel = data.models[0];
                     setSelectedModel(firstModel);
-                    localStorage.setItem("afs-model", firstModel);
                 }
             }
         } catch (err) {
@@ -111,18 +110,19 @@ export function ProviderSelector() {
 
     const handleProviderSelect = (providerId: string) => {
         setSelectedProvider(providerId);
-        localStorage.setItem("afs-provider", providerId);
-        
         const savedKeys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
         setApiKey(savedKeys[providerId] || "");
-        
-        // Hide API key input initially unless it's missing and needed
         setShowApiKeyInput(false);
+        fetchModels(providerId);
     };
 
     const handleModelSelect = (model: string) => {
         setSelectedModel(model);
-        localStorage.setItem("afs-model", model);
+    };
+
+    const handleApply = () => {
+        if (selectedProvider) localStorage.setItem("afs-provider", selectedProvider);
+        if (selectedModel) localStorage.setItem("afs-model", selectedModel);
         setIsOpen(false);
     };
 
@@ -135,16 +135,6 @@ export function ProviderSelector() {
         fetchModels();
     };
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
-
     const activeProvider = providers.find(p => p.id === selectedProvider);
     const [searchQuery, setSearchQuery] = useState("");
 
@@ -153,7 +143,7 @@ export function ProviderSelector() {
     );
 
     return (
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative">
             {/* Trigger Button */}
             <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -393,7 +383,7 @@ export function ProviderSelector() {
                                     <div className="flex items-center gap-4">
                                         <span className="text-[10px] text-white/20">Selected: <span className="text-violet-400/80">{selectedModel || "None"}</span></span>
                                         <button 
-                                            onClick={() => setIsOpen(false)}
+                                            onClick={handleApply}
                                             className="px-5 py-1.5 bg-white text-black rounded-full text-xs font-bold hover:bg-white/90 transition-all shadow-lg"
                                         >
                                             Apply Model
