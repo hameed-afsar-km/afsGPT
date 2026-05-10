@@ -85,6 +85,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     };
 
     const generateAndSetTitle = async (chatId: string, firstMessage: string) => {
+        if (!user) return;
         try {
             const provider = localStorage.getItem("afs-provider");
             const model = localStorage.getItem("afs-model");
@@ -98,7 +99,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             });
             if (response.ok) {
                 const data = await response.json();
-                if (data.title) {
+                if (data.title && user) {
                     await updateDoc(doc(db, `users/${user.uid}/chats`, chatId), {
                         title: data.title
                     });

@@ -153,7 +153,8 @@ Textarea.displayName = "Textarea";
 
 export function AnimatedAIChat() {
   const [value, setValue] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
+  const [typingChatIds, setTypingChatIds] = useState<Set<string>>(new Set());
+  const [generatingChatIds, setGeneratingChatIds] = useState<Set<string>>(new Set());
   const [isRecording, setIsRecording] = useState(false);
   const [isCallOpen, setIsCallOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -161,11 +162,7 @@ export function AnimatedAIChat() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [recentCommand, setRecentCommand] = useState<string | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const { textareaRef, adjustHeight } = useAutoResizeTextarea({
-    minHeight: 60,
-    maxHeight: 200,
-  });
-  const [inputFocused, setInputFocused] = useState(false);
+
   const {
     activeChatId,
     setActiveChatId,
@@ -175,6 +172,14 @@ export function AnimatedAIChat() {
     sendMessageToFirestore,
     deleteMessagesAfter,
   } = useChat();
+
+  const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
+  const isGenerating = activeChatId ? generatingChatIds.has(activeChatId) : false;
+  const { textareaRef, adjustHeight } = useAutoResizeTextarea({
+    minHeight: 60,
+    maxHeight: 200,
+  });
+  const [inputFocused, setInputFocused] = useState(false);
   const [isChatMode, setIsChatMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const commandPaletteRef = useRef<HTMLDivElement>(null);
@@ -183,15 +188,6 @@ export function AnimatedAIChat() {
   const activeChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Only reset typing and abort if we are moving away from an existing chat
-    // (Moving from null -> new chat should NOT reset the typing state)
-    if (activeChatIdRef.current !== null && activeChatIdRef.current !== activeChatId) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      setIsTyping(false);
-    }
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
 
@@ -199,7 +195,18 @@ export function AnimatedAIChat() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
-      setIsTyping(false);
+    }
+    if (activeChatId) {
+      setTypingChatIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeChatId);
+        return next;
+      });
+      setGeneratingChatIds(prev => {
+        const next = new Set(prev);
+        next.delete(activeChatId);
+        return next;
+      });
     }
   };
 
@@ -224,12 +231,12 @@ export function AnimatedAIChat() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-    if (messages.length > 0 && !isChatMode) {
+    if ((messages.length > 0 || activeChatId) && !isChatMode) {
       setIsChatMode(true);
-    } else if (messages.length === 0 && isChatMode) {
+    } else if (messages.length === 0 && !activeChatId && isChatMode) {
       setIsChatMode(false);
     }
-  }, [messages, isChatMode, isTyping]);
+  }, [messages, isChatMode, activeChatId]);
 
   const commandSuggestions: CommandSuggestion[] = [
     {
@@ -405,16 +412,19 @@ export function AnimatedAIChat() {
       const baseMessages = historyLimit !== undefined ? messages.slice(0, historyLimit) : messages;
       const currentMessages = [...baseMessages, userMessage];
 
-      if (historyLimit !== undefined && activeChatId) {
-        await deleteMessagesAfter(activeChatId, historyLimit);
-      }
-
       setMessages(currentMessages);
       setIsChatMode(true);
       setValue("");
       adjustHeight(true);
 
-      setIsTyping(true);
+      if (historyLimit !== undefined && activeChatId) {
+        await deleteMessagesAfter(activeChatId, historyLimit);
+      }
+
+      if (activeChatId) {
+        setTypingChatIds(prev => new Set(prev).add(activeChatId));
+        setGeneratingChatIds(prev => new Set(prev).add(activeChatId));
+      }
       setIsRecording(false);
 
       startTransition(async () => {
@@ -486,7 +496,20 @@ export function AnimatedAIChat() {
           // Isolation check: only update local UI state if we are still in the same chat
           if (activeChatIdRef.current === chatId) {
             setMessages((prev) => [...prev, aiMessage]);
-            setIsTyping(false);
+            setTypingChatIds(prev => {
+              const next = new Set(prev);
+              next.delete(chatId);
+              return next;
+            });
+            // We don't remove from generatingChatIds here, it will be set by TypewriterText.onComplete
+          } else {
+            // Background update: if we are not in the same chat, just stop the typing indicator for that chat
+            setTypingChatIds(prev => {
+              const next = new Set(prev);
+              next.delete(chatId);
+              return next;
+            });
+            // Also stop generating for background chats if not animating (optional)
           }
           abortControllerRef.current = null;
           if (chatId) await sendMessageToFirestore(chatId, aiMessage);
@@ -500,7 +523,16 @@ export function AnimatedAIChat() {
             };
             if (chatId && activeChatIdRef.current === chatId) {
               setMessages((prev) => [...prev, abortMsg]);
-              setIsTyping(false);
+              setTypingChatIds(prev => {
+                const next = new Set(prev);
+                next.delete(chatId);
+                return next;
+              });
+              setGeneratingChatIds(prev => {
+                const next = new Set(prev);
+                next.delete(chatId);
+                return next;
+              });
             }
             if (chatId) await sendMessageToFirestore(chatId, abortMsg);
             return;
@@ -513,7 +545,18 @@ export function AnimatedAIChat() {
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, errorMessage]);
-          setIsTyping(false);
+          if (chatId) {
+            setTypingChatIds(prev => {
+              const next = new Set(prev);
+              next.delete(chatId);
+              return next;
+            });
+            setGeneratingChatIds(prev => {
+              const next = new Set(prev);
+              next.delete(chatId);
+              return next;
+            });
+          }
         }
       });
     }
@@ -1019,7 +1062,19 @@ export function AnimatedAIChat() {
                               <div className="text-sm leading-relaxed text-white/90">
                                 {msg.role === "assistant" &&
                                 idx === messages.length - 1 && (msg as any).isNew ? (
-                                  <TypewriterText content={msg.content} />
+                                  <TypewriterText 
+                                    content={msg.content} 
+                                    onComplete={() => {
+                                      if (activeChatId) {
+                                        setGeneratingChatIds(prev => {
+                                          const next = new Set(prev);
+                                          next.delete(activeChatId);
+                                          return next;
+                                        });
+                                      }
+                                    }}
+                                    isStopped={!generatingChatIds.has(activeChatId || "") && idx === messages.length - 1}
+                                  />
                                 ) : (
                                   <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
@@ -1331,8 +1386,8 @@ export function AnimatedAIChat() {
           </div>
 
           <motion.button
-            onClick={() => isTyping ? stopGeneration() : handleSendMessage()}
-            disabled={(!isTyping && !value.trim()) || isUploading}
+            onClick={() => isGenerating ? stopGeneration() : handleSendMessage()}
+            disabled={(!isGenerating && !value.trim()) || isUploading}
             className={cn(
               "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
               "flex items-center gap-2",
@@ -1341,7 +1396,7 @@ export function AnimatedAIChat() {
                 : "bg-white/5 text-white/20",
             )}
           >
-            {isTyping ? (
+            {isGenerating ? (
               <Square className="w-4 h-4 fill-current" />
             ) : (
               <>
@@ -1356,20 +1411,35 @@ export function AnimatedAIChat() {
   }
 }
 
-function TypewriterText({ content }: { content: string }) {
+function TypewriterText({ content, onComplete, isStopped }: { content: string, onComplete?: () => void, isStopped?: boolean }) {
   const [displayedContent, setDisplayedContent] = useState("");
   const [index, setIndex] = useState(0);
+  const onCompleteRef = useRef(onComplete);
+  const hasCalledOnComplete = useRef(false);
 
   useEffect(() => {
-    // Reset if content changes completely (new message)
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    // Reset completion flag if content changes
+    hasCalledOnComplete.current = false;
     setDisplayedContent("");
     setIndex(0);
   }, [content]);
 
   useEffect(() => {
+    if (isStopped) {
+      setDisplayedContent(content);
+      setIndex(content.length);
+      if (!hasCalledOnComplete.current) {
+        hasCalledOnComplete.current = true;
+        onCompleteRef.current?.();
+      }
+      return;
+    }
+
     if (index < content.length) {
-      // High-performance typewriter: type significantly more characters per tick
-      // for an ultra-fast "premium" feel.
       const charsPerTick = content.length > 1000 ? 30 : content.length > 500 ? 15 : 8;
       
       const timeout = setTimeout(() => {
@@ -1377,8 +1447,13 @@ function TypewriterText({ content }: { content: string }) {
         setIndex((prev) => prev + charsPerTick);
       }, 5);
       return () => clearTimeout(timeout);
+    } else {
+      if (!hasCalledOnComplete.current) {
+        hasCalledOnComplete.current = true;
+        onCompleteRef.current?.();
+      }
     }
-  }, [content, index]);
+  }, [content, index, isStopped]);
 
   return (
     <ReactMarkdown
