@@ -35,6 +35,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useChat } from "@/context/ChatContext";
+import { ImageGallery } from "./image-gallery";
 
 interface UseAutoResizeTextareaProps {
   minHeight: number;
@@ -171,6 +172,8 @@ export function AnimatedAIChat() {
     createNewChat,
     sendMessageToFirestore,
     deleteMessagesAfter,
+    images,
+    saveGeneratedImage,
   } = useChat();
 
   const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
@@ -421,16 +424,16 @@ export function AnimatedAIChat() {
         await deleteMessagesAfter(activeChatId, historyLimit);
       }
 
-      if (activeChatId) {
-        setTypingChatIds(prev => new Set(prev).add(activeChatId));
-        setGeneratingChatIds(prev => new Set(prev).add(activeChatId));
-      }
       setIsRecording(false);
 
       startTransition(async () => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
         let chatId = activeChatId;
+
+        if (chatId) {
+          setGeneratingChatIds(prev => new Set(prev).add(chatId!));
+        }
 
         try {
           // Create new chat if this is the first message
@@ -440,6 +443,63 @@ export function AnimatedAIChat() {
 
           // Save user message to Firestore
           if (chatId) await sendMessageToFirestore(chatId, userMessage);
+
+          // ── Image Generation Detection ─────────────────────────────
+          const imageKeywords = /\b(generate|create|draw|make|produce|render|paint|design|illustrate|show me)\b.{0,40}\b(image|picture|photo|illustration|art|artwork|painting|drawing|portrait|landscape|wallpaper)\b/i;
+          const isImageRequest = imageKeywords.test(content) || /^(imagine|visualize|depict)\b/i.test(content);
+
+          if (isImageRequest && chatId) {
+            // Show a loading placeholder in the chat
+            const loadingMsg: any = {
+              role: "assistant",
+              content: "__IMAGE_GENERATING__",
+              timestamp: new Date(),
+              isNew: true,
+            };
+            setMessages(prev => [...prev, loadingMsg]);
+
+            try {
+              const imgRes = await fetch("/api/generate-image", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: content }),
+              });
+              const imgData = await imgRes.json();
+              if (imgData.error) throw new Error(imgData.error);
+
+              // New API returns a base64 dataUrl directly
+              const imageUrl = imgData.dataUrl;
+              const imageMsg: any = {
+                role: "assistant",
+                content: `__IMAGE__:${imageUrl}`,
+                timestamp: new Date(),
+                isNew: true,
+              };
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = imageMsg;
+                return updated;
+              });
+              await sendMessageToFirestore(chatId, imageMsg);
+              await saveGeneratedImage(chatId, imageUrl, imgData.prompt || content);
+            } catch (imgError: any) {
+              const errMsg: any = {
+                role: "assistant",
+                content: `❌ Image generation failed: ${imgError.message}`,
+                timestamp: new Date(),
+              };
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = errMsg;
+                return updated;
+              });
+            } finally {
+              if (chatId) setTypingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
+              if (chatId) setGeneratingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
+            }
+            return;
+          }
+          // ── End Image Generation ───────────────────────────────────
 
           let responseContent: string;
 
@@ -874,8 +934,13 @@ export function AnimatedAIChat() {
           />
         )}
 
-        {/* Scrollable area that fills the screen */}
-        <div
+        {/* ─── Images Gallery View ─────────────────────────────────────── */}
+        {activeChatId === "IMAGES" ? (
+          <ImageGallery />
+        ) : (
+          <>
+            {/* Scrollable area that fills the screen */}
+            <div
           ref={scrollRef}
           className={cn(
             "flex-1 overflow-y-auto overflow-x-hidden relative z-10 custom-scrollbar scroll-smooth",
@@ -1060,7 +1125,62 @@ export function AnimatedAIChat() {
                                 </div>
                               )}
                               <div className="text-sm leading-relaxed text-white/90">
-                                {msg.role === "assistant" &&
+                                {msg.content === "__IMAGE_GENERATING__" ? (
+                                  <div className="w-full max-w-sm aspect-square rounded-[2.5rem] overflow-hidden relative border border-white/10 bg-[#0A0A0B] shadow-2xl group">
+                                    {/* Animated Background Gradients */}
+                                    <div className="absolute inset-0 bg-gradient-to-br from-violet-600/20 via-transparent to-fuchsia-600/20 opacity-50" />
+                                    <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-violet-500/10 via-transparent to-transparent" />
+                                    
+                                    {/* Moving Light Rays */}
+                                    <div className="absolute inset-0 overflow-hidden">
+                                      <div className="absolute -inset-[100%] opacity-30 animate-[spin_8s_linear_infinite] bg-[conic-gradient(from_0deg,transparent,rgba(139,92,246,0.3),transparent,rgba(217,70,239,0.3),transparent)]" />
+                                    </div>
+
+                                    {/* Glassmorphic Overlay */}
+                                    <div className="absolute inset-0 backdrop-blur-[2px]" />
+
+                                    {/* Content */}
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 z-10">
+                                      <div className="relative">
+                                        <div className="w-20 h-20 rounded-full border border-white/10 flex items-center justify-center bg-white/5 backdrop-blur-xl">
+                                          <div className="w-12 h-12 rounded-full border-2 border-violet-500/30 border-t-violet-400 animate-spin" />
+                                        </div>
+                                        <div className="absolute -inset-4 bg-violet-500/20 blur-2xl rounded-full animate-pulse -z-10" />
+                                      </div>
+                                      
+                                      <div className="text-center space-y-1">
+                                        <span className="block text-sm font-medium text-white/90 tracking-tight">Creating your masterpiece</span>
+                                        <span className="block text-[10px] text-violet-400/60 uppercase tracking-[0.2em] font-bold animate-pulse">Afs Vision Engine</span>
+                                      </div>
+                                    </div>
+
+                                    {/* Scanning Line Effect */}
+                                    <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-violet-400 to-transparent animate-[scan_3s_ease-in-out_infinite] shadow-[0_0_15px_rgba(139,92,246,0.5)]" />
+                                  </div>
+                                ) : msg.content.startsWith("__IMAGE__:") ? (
+                                  <div className="w-full max-w-sm rounded-2xl overflow-hidden border border-white/10 shadow-[0_0_30px_rgba(139,92,246,0.2)] group/img relative">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={msg.content.replace("__IMAGE__:", "")}
+                                      alt="Generated image"
+                                      className="w-full h-auto object-cover"
+                                    />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                                      <button
+                                        onClick={() => {
+                                          const link = document.createElement("a");
+                                          link.href = msg.content.replace("__IMAGE__:", "");
+                                          link.download = `generated-image-${Date.now()}.jpg`;
+                                          link.click();
+                                        }}
+                                        className="p-3 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white transition-all transform scale-90 group-hover/img:scale-100"
+                                        title="Download Image"
+                                      >
+                                        <Download className="w-5 h-5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : msg.role === "assistant" &&
                                 idx === messages.length - 1 && (msg as any).isNew ? (
                                   <TypewriterText 
                                     content={msg.content} 
@@ -1177,6 +1297,8 @@ export function AnimatedAIChat() {
             </div>
           </div>
         )}
+      </>
+    )} {/* end IMAGES ternary */}
 
         {/* Command Palette Overlay */}
         <AnimatePresence>

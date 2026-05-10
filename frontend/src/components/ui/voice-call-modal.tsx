@@ -42,59 +42,83 @@ function LiveWaveform({
             rafRef.current = requestAnimationFrame(draw);
             const W = canvas.width;
             const H = canvas.height;
+            const centerX = W / 2;
+            const centerY = H / 2;
             ctx.clearRect(0, 0, W, H);
 
             if (!analyserNode) {
-                // Gentle sine idle animation
+                // Gentle pulsing circle for idle
                 const t = performance.now() / 1000;
+                const baseRadius = 80 + Math.sin(t * 2) * 5;
+                
                 ctx.beginPath();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = color + "50";
-                ctx.shadowColor = color;
-                ctx.shadowBlur = 6;
-                for (let x = 0; x <= W; x++) {
-                    const y = H / 2 + Math.sin((x / W) * Math.PI * 4 + t * 2) * 6;
-                    x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-                }
+                ctx.arc(centerX, centerY, baseRadius, 0, Math.PI * 2);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = color + "40";
                 ctx.stroke();
+
+                // Inner glow
+                const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, baseRadius);
+                grad.addColorStop(0, "transparent");
+                grad.addColorStop(0.8, color + "05");
+                grad.addColorStop(1, color + "20");
+                ctx.fillStyle = grad;
+                ctx.fill();
                 return;
             }
 
             const bufLen = analyserNode.frequencyBinCount;
-            const td = new Uint8Array(bufLen);
-            analyserNode.getByteTimeDomainData(td);
+            const freqData = new Uint8Array(bufLen);
+            analyserNode.getByteFrequencyData(freqData);
 
-            ctx.beginPath();
+            // Calculate average volume for pulse effect
+            let sum = 0;
+            for (let i = 0; i < bufLen; i++) sum += freqData[i];
+            const avgVol = sum / bufLen;
+            const pulse = (avgVol / 255) * 40;
+            const baseRadius = 80 + pulse;
+
+            // Draw circular spectrum
+            const barCount = 120;
+            const angleStep = (Math.PI * 2) / barCount;
+
             ctx.lineWidth = 2.5;
-            ctx.strokeStyle = color;
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 12;
-            ctx.lineJoin = "round";
             ctx.lineCap = "round";
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = color;
 
-            const sliceW = W / bufLen;
-            let x = 0;
-            for (let i = 0; i < bufLen; i++) {
-                const y = ((td[i] / 128.0) * H) / 2;
-                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-                x += sliceW;
+            for (let i = 0; i < barCount; i++) {
+                // Use frequency data to determine bar height
+                const index = Math.floor((i / barCount) * (bufLen / 3)); // Focus on lower frequencies for better visual
+                const val = freqData[index];
+                const barHeight = (val / 255) * 60;
+
+                const angle = i * angleStep - Math.PI / 2;
+                const innerX = centerX + Math.cos(angle) * baseRadius;
+                const innerY = centerY + Math.sin(angle) * baseRadius;
+                const outerX = centerX + Math.cos(angle) * (baseRadius + barHeight);
+                const outerY = centerY + Math.sin(angle) * (baseRadius + barHeight);
+
+                ctx.beginPath();
+                ctx.moveTo(innerX, innerY);
+                ctx.lineTo(outerX, outerY);
+                ctx.strokeStyle = `rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, ${0.4 + (val/255) * 0.6})`;
+                ctx.stroke();
             }
-            ctx.lineTo(W, H / 2);
+
+            // Central core circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, baseRadius, 0, Math.PI * 2);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = color;
             ctx.stroke();
 
-            // Mirror fill glow
-            const freq = new Uint8Array(analyserNode.frequencyBinCount);
-            analyserNode.getByteFrequencyData(freq);
-            const avgVol = freq.reduce((a, b) => a + b, 0) / freq.length;
-
-            if (avgVol > 10) {
-                const grad = ctx.createLinearGradient(0, 0, 0, H);
-                grad.addColorStop(0, color + "40");
-                grad.addColorStop(0.5, color + "10");
-                grad.addColorStop(1, "transparent");
-                ctx.fillStyle = grad;
-                ctx.fill();
-            }
+            // Core glow
+            const grad = ctx.createRadialGradient(centerX, centerY, baseRadius * 0.5, centerX, centerY, baseRadius);
+            grad.addColorStop(0, "transparent");
+            grad.addColorStop(1, color + "30");
+            ctx.fillStyle = grad;
+            ctx.fill();
         };
 
         draw();
@@ -102,12 +126,14 @@ function LiveWaveform({
     }, [analyserNode, phase]);
 
     return (
-        <canvas
-            ref={canvasRef}
-            width={800}
-            height={300}
-            className="w-full max-w-3xl h-[200px] md:h-[300px] object-contain"
-        />
+        <div className="relative w-full aspect-square max-w-[400px] flex items-center justify-center">
+            <canvas
+                ref={canvasRef}
+                width={800}
+                height={800}
+                className="w-full h-full object-contain"
+            />
+        </div>
     );
 }
 

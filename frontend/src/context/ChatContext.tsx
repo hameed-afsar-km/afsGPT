@@ -25,14 +25,24 @@ interface Message {
     attachments?: string[];
 }
 
+export interface GeneratedImage {
+    id?: string;
+    url: string;
+    prompt: string;
+    chatId: string;
+    timestamp: any;
+}
+
 interface ChatContextType {
     activeChatId: string | null;
     setActiveChatId: (id: string | null) => void;
     messages: Message[];
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+    images: GeneratedImage[];
     createNewChat: (firstMessage: string) => Promise<string>;
     sendMessageToFirestore: (chatId: string, message: Message) => Promise<void>;
     deleteMessagesAfter: (chatId: string, index: number) => Promise<void>;
+    saveGeneratedImage: (chatId: string, url: string, prompt: string) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -41,6 +51,27 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const { user } = useAuth();
     const [activeChatId, setActiveChatId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [images, setImages] = useState<GeneratedImage[]>([]);
+
+    // Subscribe to user's generated images
+    useEffect(() => {
+        if (!user) {
+            setImages([]);
+            return;
+        }
+        const q = query(
+            collection(db, `users/${user.uid}/images`),
+            orderBy("timestamp", "desc")
+        );
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const imgs = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as GeneratedImage[];
+            setImages(imgs);
+        });
+        return () => unsubscribe();
+    }, [user]);
 
     // Subscribe to messages when activeChatId changes
     useEffect(() => {
@@ -142,15 +173,27 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    const saveGeneratedImage = async (chatId: string, url: string, prompt: string) => {
+        if (!user) return;
+        await addDoc(collection(db, `users/${user.uid}/images`), {
+            chatId,
+            url,
+            prompt,
+            timestamp: serverTimestamp()
+        });
+    };
+
     return (
         <ChatContext.Provider value={{ 
             activeChatId, 
             setActiveChatId, 
             messages, 
             setMessages,
+            images,
             createNewChat,
             sendMessageToFirestore,
-            deleteMessagesAfter
+            deleteMessagesAfter,
+            saveGeneratedImage
         }}>
             {children}
         </ChatContext.Provider>

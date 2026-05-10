@@ -1,11 +1,12 @@
 """
-server.py — FastAPI backend for the drag-and-drop RAG system.
+server.py — FastAPI backend for the RAG & Image Generation system.
 
 Endpoints:
-  POST /upload  — Accept a file, ingest it into ChromaDB, return session_id
-  POST /query   — Answer a question using the stored collection
-  DELETE /clear — Wipe a collection (start fresh)
-  GET  /        — Serve the frontend UI
+  POST /upload              — Accept a file, ingest it into ChromaDB, return session_id
+  POST /query               — Answer a question using the stored collection
+  DELETE /clear             — Wipe a collection (start fresh)
+  POST /api/generate-image  — Generate an image via FLUX.1-schnell (Qwen-enhanced prompt)
+  GET  /static/images/*     — Serve generated images
 """
 
 import os
@@ -17,6 +18,7 @@ import logging
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
@@ -25,6 +27,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from vector import ingest_file, clear_collection
 from rag_chain import query
+from image_gen import generate_image
 
 # ─── App setup ────────────────────────────────────────────────────────────────
 
@@ -33,9 +36,21 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(title="AfsGPT RAG API", version="1.0.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+IMAGES_DIR = os.path.join(STATIC_DIR, "images")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(IMAGES_DIR, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
 
@@ -47,6 +62,9 @@ class QueryRequest(BaseModel):
 
 class ClearRequest(BaseModel):
     session_id: str
+
+class ImageGenRequest(BaseModel):
+    prompt: str
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +124,20 @@ async def ask_question(body: QueryRequest):
         raise HTTPException(status_code=500, detail=f"Query error: {str(e)}")
 
     return JSONResponse({"answer": answer})
+
+
+@app.post("/api/generate-image")
+async def create_image(body: ImageGenRequest):
+    """Generates an image via FLUX.1 using Qwen-enhanced prompt."""
+    if not body.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+    
+    result = generate_image(body.prompt, IMAGES_DIR)
+    
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+        
+    return JSONResponse(result)
 
 
 @app.delete("/clear")

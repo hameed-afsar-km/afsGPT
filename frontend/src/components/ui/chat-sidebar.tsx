@@ -15,6 +15,7 @@ import {
     X,
     LogOut,
     LogIn,
+    Image,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
@@ -161,6 +162,25 @@ export function ChatSidebar() {
                                 <PanelLeftClose className="w-4 h-4" />
                             </button>
                         </div>
+
+                        <motion.button
+                            onClick={() => setActiveChatId("IMAGES")}
+                            whileHover={{ backgroundColor: "rgba(255,255,255,0.05)" }}
+                            className={cn(
+                                "flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full group",
+                                activeChatId === "IMAGES" 
+                                    ? "bg-violet-500/20 text-violet-300 border border-violet-500/30" 
+                                    : "text-white/70 hover:text-white/90 border border-transparent"
+                            )}
+                        >
+                            <div className={cn(
+                                "w-6 h-6 rounded-full flex items-center justify-center transition-colors",
+                                activeChatId === "IMAGES" ? "bg-violet-500/30" : "bg-white/5"
+                            )}>
+                                <Image className="w-3.5 h-3.5" />
+                            </div>
+                            <span>Images</span>
+                        </motion.button>
 
                         <motion.button
                             onClick={handleNewChat}
