@@ -28,7 +28,9 @@ import {
     deleteDoc,
     doc,
     updateDoc,
-    serverTimestamp
+    serverTimestamp,
+    where,
+    getDocs
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { SettingsDialog } from "./settings-dialog";
@@ -99,6 +101,16 @@ export function ChatSidebar() {
         if (!user || !chatToDelete) return;
         try {
             await deleteDoc(doc(db, `users/${user.uid}/chats`, chatToDelete));
+            
+            // Also delete associated images
+            const imgQ = query(
+                collection(db, `users/${user.uid}/images`), 
+                where("chatId", "==", chatToDelete)
+            );
+            const imgSnapshot = await getDocs(imgQ);
+            const imgDeletePromises = imgSnapshot.docs.map(d => deleteDoc(doc(db, `users/${user.uid}/images`, d.id)));
+            await Promise.all(imgDeletePromises);
+
             if (activeChatId === chatToDelete) setActiveChatId(null);
             setChatToDelete(null);
         } catch (error) {

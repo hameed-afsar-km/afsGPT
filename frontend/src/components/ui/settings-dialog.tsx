@@ -55,7 +55,12 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             const q = collection(db, `users/${user.uid}/chats`);
             const snapshot = await getDocs(q);
             const deletePromises = snapshot.docs.map(d => deleteDoc(doc(db, `users/${user.uid}/chats`, d.id)));
-            await Promise.all(deletePromises);
+            
+            const imgQ = collection(db, `users/${user.uid}/images`);
+            const imgSnapshot = await getDocs(imgQ);
+            const imgDeletePromises = imgSnapshot.docs.map(d => deleteDoc(doc(db, `users/${user.uid}/images`, d.id)));
+
+            await Promise.all([...deletePromises, ...imgDeletePromises]);
             onClose();
         } catch (error) {
             console.error("Error clearing history:", error);
