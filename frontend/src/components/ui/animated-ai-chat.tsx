@@ -498,7 +498,7 @@ export function AnimatedAIChat() {
             setMessages((prev) => [...prev, aiMessage]);
             setTypingChatIds(prev => {
               const next = new Set(prev);
-              next.delete(chatId);
+              if (chatId) next.delete(chatId);
               return next;
             });
             // We don't remove from generatingChatIds here, it will be set by TypewriterText.onComplete
@@ -506,7 +506,7 @@ export function AnimatedAIChat() {
             // Background update: if we are not in the same chat, just stop the typing indicator for that chat
             setTypingChatIds(prev => {
               const next = new Set(prev);
-              next.delete(chatId);
+              if (chatId) next.delete(chatId);
               return next;
             });
             // Also stop generating for background chats if not animating (optional)
@@ -525,12 +525,12 @@ export function AnimatedAIChat() {
               setMessages((prev) => [...prev, abortMsg]);
               setTypingChatIds(prev => {
                 const next = new Set(prev);
-                next.delete(chatId);
+                if (chatId) next.delete(chatId);
                 return next;
               });
               setGeneratingChatIds(prev => {
                 const next = new Set(prev);
-                next.delete(chatId);
+                if (chatId) next.delete(chatId);
                 return next;
               });
             }
