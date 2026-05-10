@@ -969,31 +969,52 @@ export function AnimatedAIChat() {
   function renderInputContent() {
     return (
       <>
-        {/* Attachments Display */}
-        {fileAttachedToNextMessage.length > 0 && (
-          <div className="px-4 pt-4 pb-0 flex flex-wrap gap-2">
-            <AnimatePresence>
-              {fileAttachedToNextMessage.map((fileName, idx) => (
-                <motion.div
-                  key={`${fileName}-${idx}`}
-                  initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, y: -10 }}
-                  className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-xs group"
-                >
-                  <Paperclip className="w-3 h-3 text-violet-400" />
-                  <span className="text-white/80 max-w-[150px] truncate">
-                    {fileName}
-                  </span>
-                  <button
-                    onClick={() => removeAttachment(idx)}
-                    className="text-white/40 hover:text-red-400 transition-colors ml-1 p-0.5 rounded-md hover:bg-white/10"
+        {/* Analysis Status & Attachments Header */}
+        {(fileAttachedToNextMessage.length > 0 || isUploading) && (
+          <div className="px-5 pt-4 pb-2 border-b border-white/[0.05] flex items-center justify-between">
+            <div className="flex flex-wrap gap-3 items-center">
+              <AnimatePresence mode="popLayout">
+                {isUploading && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-violet-500/20 border border-violet-500/30 rounded-xl text-[10px] font-bold uppercase tracking-widest text-violet-300 shadow-[0_0_15px_rgba(139,92,246,0.1)]"
                   >
-                    <XIcon className="w-3 h-3" />
-                  </button>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+                    <LoaderIcon className="w-3 h-3 animate-spin" />
+                    Analyzing
+                  </motion.div>
+                )}
+                {fileAttachedToNextMessage.map((fileName, idx) => (
+                  <motion.div
+                    key={`${fileName}-${idx}`}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 10 }}
+                    className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-xs group transition-colors hover:bg-white/10"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="text-white/80 max-w-[150px] truncate font-medium">
+                      {fileName}
+                    </span>
+                    <button
+                      onClick={() => removeAttachment(idx)}
+                      className="text-white/20 hover:text-red-400 transition-colors ml-1 p-0.5 rounded-md hover:bg-white/10"
+                    >
+                      <XIcon className="w-3 h-3" />
+                    </button>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+            {ragFileName && !isUploading && (
+              <button
+                onClick={clearRagSession}
+                className="text-[10px] font-bold uppercase tracking-widest text-white/20 hover:text-red-400/60 transition-colors"
+              >
+                Clear All
+              </button>
+            )}
           </div>
         )}
 
@@ -1048,34 +1069,7 @@ export function AnimatedAIChat() {
 
         <div className="px-5 pb-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            {/* RAG active badge */}
-            <AnimatePresence>
-              {(ragFileName || isUploading) && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.85, x: -10 }}
-                  animate={{ opacity: 1, scale: 1, x: 0 }}
-                  exit={{ opacity: 0, scale: 0.85, x: -10 }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-violet-500/15 border border-violet-500/30 rounded-xl text-xs text-violet-300 max-w-[200px]"
-                >
-                  {isUploading ? (
-                    <LoaderIcon className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
-                  ) : (
-                    <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                  )}
-                  <span className="truncate">
-                    {isUploading ? `Analyzing...` : ragFileName}
-                  </span>
-                  {!isUploading && (
-                    <button
-                      onClick={clearRagSession}
-                      className="ml-0.5 text-violet-400/60 hover:text-red-400 transition-colors flex-shrink-0"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* RAG status removed from here and moved to top header */}
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -1158,10 +1152,14 @@ function TypewriterText({ content }: { content: string }) {
 
   useEffect(() => {
     if (index < content.length) {
+      // High-performance typewriter: type significantly more characters per tick
+      // for an ultra-fast "premium" feel.
+      const charsPerTick = content.length > 1000 ? 30 : content.length > 500 ? 15 : 8;
+      
       const timeout = setTimeout(() => {
-        setDisplayedContent((prev) => prev + content[index]);
-        setIndex((prev) => prev + 1);
-      }, 4); // Extremely fast and smooth typing
+        setDisplayedContent(content.slice(0, index + charsPerTick));
+        setIndex((prev) => prev + charsPerTick);
+      }, 5);
       return () => clearTimeout(timeout);
     }
   }, [content, index]);
