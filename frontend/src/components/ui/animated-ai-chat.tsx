@@ -429,7 +429,7 @@ export function AnimatedAIChat() {
           }
 
           // Save user message to Firestore
-          await sendMessageToFirestore(chatId, userMessage);
+          if (chatId) await sendMessageToFirestore(chatId, userMessage);
 
           let responseContent: string;
 
@@ -489,7 +489,7 @@ export function AnimatedAIChat() {
             setIsTyping(false);
           }
           abortControllerRef.current = null;
-          await sendMessageToFirestore(chatId, aiMessage);
+          if (chatId) await sendMessageToFirestore(chatId, aiMessage);
         } catch (error: any) {
           if (error.name === "AbortError") {
             const abortMsg: any = {
@@ -498,11 +498,11 @@ export function AnimatedAIChat() {
               timestamp: new Date(),
               isNew: true
             };
-            if (activeChatIdRef.current === chatId) {
+            if (chatId && activeChatIdRef.current === chatId) {
               setMessages((prev) => [...prev, abortMsg]);
               setIsTyping(false);
             }
-            await sendMessageToFirestore(chatId, abortMsg);
+            if (chatId) await sendMessageToFirestore(chatId, abortMsg);
             return;
           }
           console.error("Chat error:", error);
