@@ -149,24 +149,29 @@ export function ChatSidebar() {
 
                 <div className="flex flex-col h-full w-[260px] relative z-10">
                     {/* Header */}
-                    <div className="p-3 flex items-center justify-between">
+                    <div className="flex flex-col p-3 gap-2">
+                        <div className="flex items-center justify-between px-2 mb-2">
+                            <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400 tracking-tight">
+                                afsGPT
+                            </span>
+                            <button
+                                onClick={() => setIsOpen(false)}
+                                className="p-1.5 text-white/40 hover:text-white/90 rounded-lg transition-colors"
+                            >
+                                <PanelLeftClose className="w-4 h-4" />
+                            </button>
+                        </div>
+
                         <motion.button
                             onClick={handleNewChat}
                             whileHover={{ backgroundColor: "rgba(255,255,255,0.05)" }}
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-white/90 text-sm font-medium transition-colors w-full group"
+                            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-white/90 text-sm font-medium transition-colors w-full group border border-white/5 bg-white/[0.02]"
                         >
-                            <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+                            <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-violet-300">
                                 <Plus className="w-4 h-4" />
                             </div>
                             <span>New chat</span>
                         </motion.button>
-
-                        <button
-                            onClick={() => setIsOpen(false)}
-                            className="p-2 text-white/40 hover:text-white/90 rounded-lg transition-colors ml-1"
-                        >
-                            <PanelLeftClose className="w-4 h-4" />
-                        </button>
                     </div>
 
                     {/* History */}
@@ -321,13 +326,16 @@ export function ChatSidebar() {
 
             {/* Open Toggle (when closed) */}
             {!isOpen && (
-                <div className="fixed top-4 left-4 z-50">
+                <div className="fixed top-4 left-4 z-50 flex items-center gap-3">
                     <button
                         onClick={() => setIsOpen(true)}
                         className="p-2.5 bg-[#0d0d0d] border border-white/10 text-white/60 hover:text-white/90 rounded-xl transition-all shadow-xl backdrop-blur-md"
                     >
                         <PanelLeftOpen className="w-5 h-5" />
                     </button>
+                    <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400 drop-shadow-[0_0_10px_rgba(139,92,246,0.3)] tracking-tight">
+                        afsGPT
+                    </span>
                 </div>
             )}
 

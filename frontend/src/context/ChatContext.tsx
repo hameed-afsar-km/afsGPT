@@ -10,11 +10,15 @@ import {
     serverTimestamp, 
     onSnapshot, 
     query, 
-    orderBy 
+    orderBy,
+    getDocs,
+    writeBatch,
+    deleteDoc 
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 interface Message {
+    id?: string;
     role: "user" | "assistant";
     content: string;
     timestamp: any;
@@ -28,6 +32,7 @@ interface ChatContextType {
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
     createNewChat: (firstMessage: string) => Promise<string>;
     sendMessageToFirestore: (chatId: string, message: Message) => Promise<void>;
+    deleteMessagesAfter: (chatId: string, index: number) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -51,6 +56,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const msgs = snapshot.docs.map(doc => ({
+                id: doc.id,
                 ...doc.data()
             })) as Message[];
             setMessages(msgs);
@@ -117,6 +123,24 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         });
     };
 
+    const deleteMessagesAfter = async (chatId: string, index: number) => {
+        if (!user) return;
+        const q = query(
+            collection(db, `users/${user.uid}/chats/${chatId}/messages`),
+            orderBy("timestamp", "asc")
+        );
+        const snapshot = await getDocs(q);
+        // We want to delete the message at 'index' and everything after it
+        // because handleSendMessage will append the NEW version of the edited message.
+        const docsToDelete = snapshot.docs.slice(index);
+        
+        if (docsToDelete.length > 0) {
+            const batch = writeBatch(db);
+            docsToDelete.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+        }
+    };
+
     return (
         <ChatContext.Provider value={{ 
             activeChatId, 
@@ -124,7 +148,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             messages, 
             setMessages,
             createNewChat,
-            sendMessageToFirestore
+            sendMessageToFirestore,
+            deleteMessagesAfter
         }}>
             {children}
         </ChatContext.Provider>

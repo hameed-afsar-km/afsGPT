@@ -21,6 +21,10 @@ import {
   X,
   Copy,
   Check,
+  Download,
+  Pencil,
+  AlertCircle,
+  Square,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -169,11 +173,35 @@ export function AnimatedAIChat() {
     setMessages,
     createNewChat,
     sendMessageToFirestore,
+    deleteMessagesAfter,
   } = useChat();
   const [isChatMode, setIsChatMode] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const commandPaletteRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const activeChatIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Only reset typing and abort if we are moving away from an existing chat
+    // (Moving from null -> new chat should NOT reset the typing state)
+    if (activeChatIdRef.current !== null && activeChatIdRef.current !== activeChatId) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setIsTyping(false);
+    }
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsTyping(false);
+    }
+  };
 
   // ── RAG state ────────────────────────────────────────────────────────────
   const [ragSessionId, setRagSessionId] = useState<string | null>(null);
@@ -183,6 +211,14 @@ export function AnimatedAIChat() {
   >([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<any>(null);
+  const [isCheckingModel, setIsCheckingModel] = useState(false);
+  const [isPullingModel, setIsPullingModel] = useState(false);
+  const [isModelInstalled, setIsModelInstalled] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -319,10 +355,38 @@ export function AnimatedAIChat() {
     }
   };
 
-  const handleSendMessage = async (overrideText?: string) => {
+  const handleSendMessage = async (overrideText?: string, historyLimit?: number, bypassCodeCheck = false) => {
     const textToSend = overrideText || value;
     if (textToSend.trim()) {
       const content = textToSend.trim();
+
+      if (!bypassCodeCheck) {
+        const provider = localStorage.getItem("afs-provider");
+        const model = localStorage.getItem("afs-model");
+        const codeKeywords = ["code", "function", "script", "python", "javascript", "react", "html", "css", "bug", "debug", "api"];
+        const isCodeRelated = codeKeywords.some(keyword => content.toLowerCase().includes(keyword));
+        
+        if (provider === "ollama" && model !== "qwen2.5-coder:7b" && isCodeRelated) {
+          setPendingMessage({ text: content, limit: historyLimit });
+          setShowCodeModal(true);
+          
+          setIsCheckingModel(true);
+          try {
+            const res = await fetch("/api/models", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ provider: "ollama" })
+            });
+            const data = await res.json();
+            setIsModelInstalled(data.models?.includes("qwen2.5-coder:7b"));
+          } catch (e) {
+            setIsModelInstalled(false);
+          }
+          setIsCheckingModel(false);
+          return;
+        }
+      }
+
       const userMessage: any = {
         role: "user",
         content: content,
@@ -338,7 +402,13 @@ export function AnimatedAIChat() {
         setFileAttachedToNextMessage([]);
       }
 
-      const currentMessages = [...messages, userMessage];
+      const baseMessages = historyLimit !== undefined ? messages.slice(0, historyLimit) : messages;
+      const currentMessages = [...baseMessages, userMessage];
+
+      if (historyLimit !== undefined && activeChatId) {
+        await deleteMessagesAfter(activeChatId, historyLimit);
+      }
+
       setMessages(currentMessages);
       setIsChatMode(true);
       setValue("");
@@ -348,9 +418,11 @@ export function AnimatedAIChat() {
       setIsRecording(false);
 
       startTransition(async () => {
-        try {
-          let chatId = activeChatId;
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        let chatId = activeChatId;
 
+        try {
           // Create new chat if this is the first message
           if (!chatId) {
             chatId = await createNewChat(content);
@@ -366,6 +438,7 @@ export function AnimatedAIChat() {
             const ragRes = await fetch("/api/rag/query", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
               body: JSON.stringify({
                 session_id: ragSessionId,
                 question: content,
@@ -387,6 +460,7 @@ export function AnimatedAIChat() {
             const response = await fetch("/api/chat", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
               body: JSON.stringify({
                 messages: currentMessages,
                 provider,
@@ -406,11 +480,31 @@ export function AnimatedAIChat() {
             role: "assistant",
             content: responseContent,
             timestamp: new Date(),
+            isNew: true,
           };
-          setMessages((prev) => [...prev, aiMessage]);
-          setIsTyping(false);
+
+          // Isolation check: only update local UI state if we are still in the same chat
+          if (activeChatIdRef.current === chatId) {
+            setMessages((prev) => [...prev, aiMessage]);
+            setIsTyping(false);
+          }
+          abortControllerRef.current = null;
           await sendMessageToFirestore(chatId, aiMessage);
-        } catch (error) {
+        } catch (error: any) {
+          if (error.name === "AbortError") {
+            const abortMsg: any = {
+              role: "assistant",
+              content: "_Generation cancelled by user._",
+              timestamp: new Date(),
+              isNew: true
+            };
+            if (activeChatIdRef.current === chatId) {
+              setMessages((prev) => [...prev, abortMsg]);
+              setIsTyping(false);
+            }
+            await sendMessageToFirestore(chatId, abortMsg);
+            return;
+          }
           console.error("Chat error:", error);
           const errorMessage: any = {
             role: "assistant",
@@ -599,6 +693,86 @@ export function AnimatedAIChat() {
 
   return (
     <>
+      <AnimatePresence>
+        {showCodeModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-[#111] border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl relative"
+            >
+              <div className="flex items-center gap-3 text-violet-400 mb-4">
+                <Code2 className="w-6 h-6" />
+                <h3 className="text-lg font-semibold text-white">Better Coding Experience</h3>
+              </div>
+              <p className="text-white/70 text-sm leading-relaxed mb-6">
+                We noticed you're asking about code. For the best experience, we recommend switching to the specialized <strong>qwen2.5-coder:7b</strong> model.
+                {!isCheckingModel && !isModelInstalled && (
+                  <span className="block mt-2 text-yellow-400/80 text-xs">
+                    <AlertCircle className="inline-block w-3.5 h-3.5 mr-1 mb-0.5" />
+                    This model is not currently installed.
+                  </span>
+                )}
+              </p>
+              
+              <div className="flex flex-col gap-3">
+                {isCheckingModel ? (
+                  <button disabled className="w-full py-2.5 bg-violet-600/50 rounded-xl text-sm font-medium flex justify-center text-white">
+                    <LoaderIcon className="w-4 h-4 animate-spin" />
+                  </button>
+                ) : isPullingModel ? (
+                  <button disabled className="w-full py-2.5 bg-violet-600/50 rounded-xl text-sm font-medium flex items-center justify-center gap-2 text-white">
+                    <LoaderIcon className="w-4 h-4 animate-spin" />
+                    Installing Model...
+                  </button>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      if (!isModelInstalled) {
+                        setIsPullingModel(true);
+                        try {
+                          const res = await fetch("/api/models/pull", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ model: "qwen2.5-coder:7b" })
+                          });
+                          if (res.ok) setIsModelInstalled(true);
+                        } catch (e) {
+                          console.error("Failed to pull model", e);
+                        }
+                        setIsPullingModel(false);
+                      }
+                      localStorage.setItem("afs-model", "qwen2.5-coder:7b");
+                      setShowCodeModal(false);
+                      handleSendMessage(pendingMessage?.text, pendingMessage?.limit, true);
+                      setPendingMessage(null);
+                    }}
+                    className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition-colors text-white"
+                  >
+                    {isModelInstalled ? "Yes, use qwen2.5-coder:7b" : "Install & Use"}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setShowCodeModal(false);
+                    handleSendMessage(pendingMessage?.text, pendingMessage?.limit, true);
+                    setPendingMessage(null);
+                  }}
+                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm font-medium transition-colors text-white/70"
+                >
+                  No, continue with current model
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <VoiceCallModal
         isOpen={isCallOpen}
         onClose={() => setIsCallOpen(false)}
@@ -618,21 +792,7 @@ export function AnimatedAIChat() {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {/* Branding */}
-        <div className="absolute top-0 left-0 right-0 p-6 flex justify-center items-center z-50 pointer-events-none">
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-2"
-          >
-            <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center border border-violet-500/30 shadow-[0_0_15px_rgba(139,92,246,0.3)]">
-              <Sparkles className="w-4 h-4 text-violet-400" />
-            </div>
-            <span className="text-xl font-extrabold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-violet-400 via-fuchsia-300 to-indigo-400 font-sans uppercase">
-              afsGPT
-            </span>
-          </motion.div>
-        </div>
+
         {/* Drag Overlay */}
         <AnimatePresence>
           {isDragging && (
@@ -763,22 +923,33 @@ export function AnimatedAIChat() {
                         delay: idx === messages.length - 1 ? 0.1 : 0,
                       }}
                       className={cn(
-                        "flex w-full",
-                        msg.role === "user" ? "justify-end" : "justify-start",
+                        "flex w-full transition-all duration-500",
+                        editingMessageIndex === idx
+                          ? "justify-center"
+                          : msg.role === "user"
+                          ? "justify-end"
+                          : "justify-start",
                       )}
                     >
                       <div
                         className={cn(
-                          "max-w-[85%] flex flex-col group",
+                          "flex flex-col group transition-all duration-500",
+                          editingMessageIndex === idx ? "w-full" : "max-w-[85%]",
                           msg.role === "user"
-                            ? "items-end ml-16"
+                            ? editingMessageIndex === idx
+                              ? "items-stretch"
+                              : "items-end ml-16"
+                            : editingMessageIndex === idx
+                            ? "items-stretch"
                             : "items-start mr-16",
                         )}
                       >
                         <div
                           className={cn(
                             "w-full rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-3xl border transition-all duration-500",
-                            msg.role === "user"
+                            editingMessageIndex === idx
+                              ? "bg-white/[0.05] border-white/[0.12] shadow-2xl"
+                              : msg.role === "user"
                               ? "bg-white/[0.08] border-white/[0.1] text-white/90 rounded-tr-none"
                               : "bg-white/[0.03] border-white/[0.05] text-white/80 rounded-tl-none",
                           )}
@@ -805,57 +976,87 @@ export function AnimatedAIChat() {
                               ))}
                             </div>
                           )}
-                          {msg.role === "assistant" && (
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center border border-violet-500/30">
-                                  <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                                </div>
-                                <span className="text-[11px] uppercase tracking-[0.2em] font-bold text-violet-400/80">
-                                  Afs AI
-                                </span>
+                          {msg.role === "user" && editingMessageIndex === idx ? (
+                            <div className="flex flex-col w-full gap-4 mt-2">
+                              <textarea
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white/90 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 resize-y min-h-[120px] transition-all"
+                                autoFocus
+                              />
+                              <div className="flex justify-end gap-3">
+                                <button
+                                  onClick={() => setEditingMessageIndex(null)}
+                                  className="px-5 py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-white/60 transition-all border border-white/5"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingMessageIndex(null);
+                                    handleSendMessage(editValue, idx);
+                                  }}
+                                  className="px-5 py-2 rounded-xl text-xs font-semibold bg-white text-black hover:bg-white/90 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)]"
+                                >
+                                  Save & Submit
+                                </button>
                               </div>
                             </div>
+                          ) : (
+                            <>
+                              {msg.role === "assistant" && (
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-full bg-violet-500/20 flex items-center justify-center border border-violet-500/30">
+                                      <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                                    </div>
+                                    <span className="text-[11px] uppercase tracking-[0.2em] font-bold text-violet-400/80">
+                                      Afs AI
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                              <div className="text-sm leading-relaxed text-white/90">
+                                {msg.role === "assistant" &&
+                                idx === messages.length - 1 && (msg as any).isNew ? (
+                                  <TypewriterText content={msg.content} />
+                                ) : (
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      p: ({ children }) => (
+                                        <p className="mb-2 last:mb-0 font-light tracking-wide">
+                                          {children}
+                                        </p>
+                                      ),
+                                      strong: ({ children }) => (
+                                        <strong className="font-bold text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.3)]">
+                                          {children}
+                                        </strong>
+                                      ),
+                                      pre: ({ children }) => <>{children}</>,
+                                      code: CodeBlock as any,
+                                      ul: ({ children }) => (
+                                        <ul className="list-disc ml-4 mb-2 space-y-1">
+                                          {children}
+                                        </ul>
+                                      ),
+                                      ol: ({ children }) => (
+                                        <ol className="list-decimal ml-4 mb-2 space-y-1">
+                                          {children}
+                                        </ol>
+                                      ),
+                                      li: ({ children }) => (
+                                        <li className="font-light">{children}</li>
+                                      ),
+                                    }}
+                                  >
+                                    {msg.content}
+                                  </ReactMarkdown>
+                                )}
+                              </div>
+                            </>
                           )}
-                          <div className="text-sm leading-relaxed text-white/90">
-                            {msg.role === "assistant" &&
-                            idx === messages.length - 1 ? (
-                              <TypewriterText content={msg.content} />
-                            ) : (
-                              <ReactMarkdown
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                  p: ({ children }) => (
-                                    <p className="mb-2 last:mb-0 font-light tracking-wide">
-                                      {children}
-                                    </p>
-                                  ),
-                                  strong: ({ children }) => (
-                                    <strong className="font-bold text-violet-300 drop-shadow-[0_0_8px_rgba(167,139,250,0.3)]">
-                                      {children}
-                                    </strong>
-                                  ),
-                                  pre: ({ children }) => <>{children}</>,
-                                  code: CodeBlock as any,
-                                  ul: ({ children }) => (
-                                    <ul className="list-disc ml-4 mb-2 space-y-1">
-                                      {children}
-                                    </ul>
-                                  ),
-                                  ol: ({ children }) => (
-                                    <ol className="list-decimal ml-4 mb-2 space-y-1">
-                                      {children}
-                                    </ol>
-                                  ),
-                                  li: ({ children }) => (
-                                    <li className="font-light">{children}</li>
-                                  ),
-                                }}
-                              >
-                                {msg.content}
-                              </ReactMarkdown>
-                            )}
-                          </div>
                         </div>
                         <div className="mt-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 px-2">
                           {msg.role === "assistant" && (
@@ -867,19 +1068,22 @@ export function AnimatedAIChat() {
                               <Volume2 className="w-3.5 h-3.5" />
                             </button>
                           )}
-                          <button
-                            onClick={() =>
-                              navigator.clipboard.writeText(msg.content)
-                            }
-                            className="p-1.5 rounded-full hover:bg-white/10 text-white/30 hover:text-white/70 transition-colors"
-                            title={
-                              msg.role === "user"
-                                ? "Copy prompt"
-                                : "Copy output"
-                            }
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
+                          {msg.role === "user" && editingMessageIndex !== idx && (
+                            <button
+                              onClick={() => {
+                                setEditValue(msg.content);
+                                setEditingMessageIndex(idx);
+                              }}
+                              className="p-1.5 rounded-full hover:bg-white/10 text-white/30 hover:text-white/70 transition-colors"
+                              title="Edit message"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <CopyButton 
+                            text={msg.content} 
+                            className="p-1.5 rounded-full hover:bg-white/10 text-white/30 hover:text-white/70"
+                          />
                         </div>
                       </div>
                     </motion.div>
@@ -1127,22 +1331,24 @@ export function AnimatedAIChat() {
           </div>
 
           <motion.button
-            onClick={() => handleSendMessage()}
-            disabled={isTyping || !value.trim() || isUploading}
+            onClick={() => isTyping ? stopGeneration() : handleSendMessage()}
+            disabled={(!isTyping && !value.trim()) || isUploading}
             className={cn(
               "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
               "flex items-center gap-2",
-              value.trim() && !isUploading
+              (value.trim() || isTyping) && !isUploading
                 ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                 : "bg-white/5 text-white/20",
             )}
           >
             {isTyping ? (
-              <LoaderIcon className="w-4 h-4 animate-spin" />
+              <Square className="w-4 h-4 fill-current" />
             ) : (
-              <SendIcon className="w-4 h-4" />
+              <>
+                <SendIcon className="w-4 h-4" />
+                <span>Send</span>
+              </>
             )}
-            <span>Send</span>
           </motion.button>
         </div>
       </>
@@ -1240,6 +1446,59 @@ function ThinkingLoader() {
   );
 }
 
+function CopyButton({ text, showLabel = false, className }: { text: string, showLabel?: boolean, className?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={cn("relative flex items-center gap-1.5 transition-all", className)}
+      title="Copy to clipboard"
+    >
+      <AnimatePresence mode="wait">
+        {copied ? (
+          <motion.div
+            key="check"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+          >
+            <Check className="w-3.5 h-3.5 text-green-400" />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="copy"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {showLabel && <span>{copied ? "Copied" : "Copy"}</span>}
+      <AnimatePresence>
+        {copied && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.8 }}
+            animate={{ opacity: 1, y: -25, scale: 1 }}
+            exit={{ opacity: 0, y: -35, scale: 0.8 }}
+            className="absolute left-1/2 -translate-x-1/2 px-2 py-1 bg-violet-600 text-white text-[9px] font-bold rounded-md shadow-lg pointer-events-none uppercase tracking-widest z-50"
+          >
+            Copied
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </button>
+  );
+}
+
 function TypingDots() {
   return (
     <div className="flex items-center ml-1">
@@ -1305,13 +1564,72 @@ function CodeBlock({ className, children, ...props }: any) {
     <div className="my-4 rounded-xl overflow-hidden border border-white/10 bg-[#0d0d0d] shadow-xl">
       <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 border-b border-white/10">
         <span className="text-xs font-mono text-white/50 lowercase">{language}</span>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
-        >
-          {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              const blob = new Blob([String(children).replace(/\n$/, "")], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              let ext = "txt";
+              if (language === "javascript") ext = "js";
+              else if (language === "python") ext = "py";
+              else if (language === "typescript") ext = "ts";
+              else if (language === "html") ext = "html";
+              else if (language === "css") ext = "css";
+              else if (language !== "text") ext = language;
+              a.download = `code_snippet.${ext}`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+            title="Download Code"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Download</span>
+          </button>
+          <button
+            onClick={handleCopy}
+            className="relative flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+          >
+            <AnimatePresence mode="wait">
+              {copied ? (
+                <motion.div
+                  key="check"
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.8, opacity: 0 }}
+                >
+                  <Check className="w-3.5 h-3.5 text-green-400" />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="copy"
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.8, opacity: 0 }}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <span>{copied ? "Copied" : "Copy"}</span>
+            <AnimatePresence>
+              {copied && (
+                <motion.div
+                  initial={{ opacity: 0, y: 5, scale: 0.8 }}
+                  animate={{ opacity: 1, y: -25, scale: 1 }}
+                  exit={{ opacity: 0, y: -35, scale: 0.8 }}
+                  className="absolute left-1/2 -translate-x-1/2 px-2 py-1 bg-violet-600 text-white text-[9px] font-bold rounded-md shadow-lg pointer-events-none uppercase tracking-widest z-50"
+                >
+                  Copied
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </button>
+        </div>
       </div>
       <div className="p-0 overflow-x-auto text-sm font-mono text-white/80 custom-scrollbar max-w-full">
         <SyntaxHighlighter
