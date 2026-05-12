@@ -36,6 +36,7 @@ export interface GeneratedImage {
 interface ChatContextType {
     activeChatId: string | null;
     setActiveChatId: (id: string | null) => void;
+    activeChatTitle: string | null;
     messages: Message[];
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
     images: GeneratedImage[];
@@ -50,6 +51,7 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 export function ChatProvider({ children }: { children: React.ReactNode }) {
     const { user } = useAuth();
     const [activeChatId, setActiveChatId] = useState<string | null>(null);
+    const [activeChatTitle, setActiveChatTitle] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [images, setImages] = useState<GeneratedImage[]>([]);
 
@@ -73,12 +75,23 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         return () => unsubscribe();
     }, [user]);
 
-    // Subscribe to messages when activeChatId changes
+    // Subscribe to messages and title when activeChatId changes
     useEffect(() => {
         if (!user || !activeChatId) {
-            if (!activeChatId) setMessages([]);
+            if (!activeChatId) {
+                setMessages([]);
+                setActiveChatTitle(null);
+            }
             return;
         }
+
+        // Fetch title
+        const chatDocRef = doc(db, `users/${user.uid}/chats/${activeChatId}`);
+        const unsubscribeTitle = onSnapshot(chatDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setActiveChatTitle(docSnap.data().title || "Untitled Chat");
+            }
+        });
 
         const q = query(
             collection(db, `users/${user.uid}/chats/${activeChatId}/messages`),
@@ -93,7 +106,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             setMessages(msgs);
         });
 
-        return () => unsubscribe();
+        return () => {
+            unsubscribe();
+            unsubscribeTitle();
+        };
     }, [user, activeChatId]);
 
     const createNewChat = async (firstMessage: string) => {
@@ -197,6 +213,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         <ChatContext.Provider value={{ 
             activeChatId, 
             setActiveChatId, 
+            activeChatTitle,
             messages, 
             setMessages,
             images,

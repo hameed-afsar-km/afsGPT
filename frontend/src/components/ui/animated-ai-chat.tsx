@@ -177,6 +177,7 @@ export function AnimatedAIChat() {
     deleteMessagesAfter,
     images,
     saveGeneratedImage,
+    activeChatTitle,
   } = useChat();
 
   const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
@@ -237,6 +238,7 @@ export function AnimatedAIChat() {
   const [isCheckingModel, setIsCheckingModel] = useState(false);
   const [isPullingModel, setIsPullingModel] = useState(false);
   const [isModelInstalled, setIsModelInstalled] = useState(false);
+  const [fullscreenCode, setFullscreenCode] = useState<{ code: string; language: string; title: string } | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -1382,6 +1384,8 @@ export function AnimatedAIChat() {
                                 idx === messages.length - 1 && (msg as any).isNew ? (
                                   <TypewriterText 
                                     content={msg.content} 
+                                    chatTitle={activeChatTitle}
+                                    onExpand={(code, lang, title) => setFullscreenCode({ code, language: lang, title })}
                                     onComplete={() => {
                                       if (activeChatId) {
                                         setGeneratingChatIds(prev => {
@@ -1408,7 +1412,13 @@ export function AnimatedAIChat() {
                                         </strong>
                                       ),
                                       pre: ({ children }) => <>{children}</>,
-                                      code: CodeBlock as any,
+                                      code: (props: any) => (
+                                        <CodeBlock 
+                                          {...props} 
+                                          chatTitle={activeChatTitle} 
+                                          onExpand={(code: string, lang: string, title: string) => setFullscreenCode({ code, language: lang, title })} 
+                                        />
+                                      ),
                                       ul: ({ children }) => (
                                         <ul className="list-disc ml-4 mb-2 space-y-1">
                                           {children}
@@ -1569,6 +1579,77 @@ export function AnimatedAIChat() {
           )}
         </AnimatePresence>
       </div>
+
+      <AnimatePresence>
+        {fullscreenCode && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.98, backdropFilter: "blur(0px)" }}
+            animate={{ opacity: 1, scale: 1, backdropFilter: "blur(20px)" }}
+            exit={{ opacity: 0, scale: 0.98, backdropFilter: "blur(0px)" }}
+            className="fixed inset-0 z-[100] flex flex-col bg-black/80 p-6 md:p-12"
+          >
+            <div className="flex items-center justify-between mb-6 pb-6 border-b border-white/10">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-violet-400 lowercase bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded-md">
+                    {fullscreenCode.language}
+                  </span>
+                  <h3 className="text-lg font-semibold text-white/90 tracking-tight">Full Screen Code View</h3>
+                </div>
+                <p className="text-xs text-white/40 italic ml-0.5">{fullscreenCode.title}</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(fullscreenCode.code);
+                    const btn = document.getElementById('modal-copy-btn');
+                    if (btn) {
+                      const toast = document.createElement('span');
+                      toast.className = "pointer-events-none absolute left-1/2 bottom-full mb-1 px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest text-white whitespace-nowrap z-[110]";
+                      toast.style.background = "linear-gradient(135deg, #7c3aed, #a855f7)";
+                      toast.style.boxShadow = "0 4px 15px rgba(139,92,246,0.5)";
+                      toast.style.animation = "copied-toast 1.8s ease forwards";
+                      toast.innerText = "✓ Copied!";
+                      btn.appendChild(toast);
+                      setTimeout(() => toast.remove(), 2000);
+                    }
+                  }}
+                  id="modal-copy-btn"
+                  className="relative flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 rounded-2xl text-xs font-bold text-white/60 hover:text-white/90 transition-all border border-white/10 active:scale-95"
+                >
+                  <Copy className="w-4 h-4" />
+                  <span>Copy Code</span>
+                </button>
+                <button
+                  onClick={() => setFullscreenCode(null)}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-red-500/20 rounded-2xl text-xs font-bold text-white/60 hover:text-red-400 transition-all border border-white/10 hover:border-red-500/30 group"
+                >
+                  <X className="w-4 h-4 transition-transform group-hover:rotate-90" />
+                  <span>Close</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto custom-scrollbar rounded-2xl bg-black/40 border border-white/5 shadow-2xl">
+              <SyntaxHighlighter
+                language={fullscreenCode.language === "text" ? "javascript" : fullscreenCode.language}
+                style={vscDarkPlus}
+                PreTag="div"
+                customStyle={{
+                  margin: 0,
+                  background: "transparent",
+                  padding: "2.5rem",
+                  fontSize: "15px",
+                  lineHeight: "1.7",
+                }}
+                showLineNumbers={true}
+                wrapLongLines={false}
+              >
+                {fullscreenCode.code}
+              </SyntaxHighlighter>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 
@@ -1807,7 +1888,19 @@ export function AnimatedAIChat() {
   }
 }
 
-function TypewriterText({ content, onComplete, isStopped }: { content: string, onComplete?: () => void, isStopped?: boolean }) {
+function TypewriterText({ 
+  content, 
+  onComplete, 
+  isStopped, 
+  chatTitle, 
+  onExpand 
+}: { 
+  content: string, 
+  onComplete?: () => void, 
+  isStopped?: boolean,
+  chatTitle: string | null,
+  onExpand: (code: string, lang: string, title: string) => void
+}) {
   const [displayedContent, setDisplayedContent] = useState("");
   const [index, setIndex] = useState(0);
   const onCompleteRef = useRef(onComplete);
@@ -1864,7 +1957,13 @@ function TypewriterText({ content, onComplete, isStopped }: { content: string, o
           </strong>
         ),
         pre: ({ children }) => <>{children}</>,
-        code: CodeBlock as any,
+        code: (props: any) => (
+          <CodeBlock 
+            {...props} 
+            chatTitle={chatTitle} 
+            onExpand={onExpand} 
+          />
+        ),
         ul: ({ children }) => (
           <ul className="list-disc ml-4 mb-2 space-y-1">{children}</ul>
         ),
@@ -1932,43 +2031,29 @@ function CopyButton({ text, showLabel = false, className }: { text: string, show
   return (
     <button
       onClick={handleCopy}
-      className={cn("relative flex items-center gap-1.5 transition-all", className)}
+      className={cn(
+        "relative flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all active:scale-95",
+        copied ? "text-emerald-400 bg-emerald-500/10" : "text-white/40 hover:text-white/90 hover:bg-white/5",
+        className
+      )}
       title="Copy to clipboard"
     >
-      <AnimatePresence mode="wait">
-        {copied ? (
-          <motion.div
-            key="check"
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-          >
-            <Check className="w-3.5 h-3.5 text-green-400" />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="copy"
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-          >
-            <Copy className="w-3.5 h-3.5" />
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {showLabel && <span>{copied ? "Copied" : "Copy"}</span>}
-      <AnimatePresence>
-        {copied && (
-          <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.8 }}
-            animate={{ opacity: 1, y: -25, scale: 1 }}
-            exit={{ opacity: 0, y: -35, scale: 0.8 }}
-            className="absolute left-1/2 -translate-x-1/2 px-2 py-1 bg-violet-600 text-white text-[9px] font-bold rounded-md shadow-lg pointer-events-none uppercase tracking-widest z-50"
-          >
-            Copied
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {copied && (
+        <span
+          className="pointer-events-none absolute left-1/2 bottom-full mb-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest text-white whitespace-nowrap z-50"
+          style={{
+            background: "linear-gradient(135deg, #7c3aed, #a855f7)",
+            boxShadow: "0 4px 15px rgba(139,92,246,0.5)",
+            animation: "copied-toast 1.8s ease forwards",
+          }}
+        >
+          ✓ Copied!
+        </span>
+      )}
+      <span style={copied ? { animation: "check-pop 0.3s ease forwards" } : {}}>
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </span>
+      {showLabel && <span className="text-xs font-bold uppercase tracking-wider">{copied ? "Copied" : "Copy"}</span>}
     </button>
   );
 }
@@ -2005,6 +2090,28 @@ const rippleKeyframes = `
   0% { transform: scale(0.5); opacity: 0.6; }
   100% { transform: scale(2); opacity: 0; }
 }
+@keyframes copied-toast {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(0px) scale(0.8); }
+  15%  { opacity: 1; transform: translateX(-50%) translateY(-28px) scale(1); }
+  70%  { opacity: 1; transform: translateX(-50%) translateY(-28px) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-36px) scale(0.9); }
+}
+@keyframes check-pop {
+  0%   { transform: scale(0) rotate(-12deg); opacity: 0; }
+  60%  { transform: scale(1.2) rotate(4deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+@keyframes downloaded-toast {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(0px) scale(0.8); }
+  15%  { opacity: 1; transform: translateX(-50%) translateY(-28px) scale(1); }
+  70%  { opacity: 1; transform: translateX(-50%) translateY(-28px) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-36px) scale(0.9); }
+}
+@keyframes download-pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
 `;
 
 if (typeof document !== "undefined") {
@@ -2013,8 +2120,9 @@ if (typeof document !== "undefined") {
   document.head.appendChild(style);
 }
 
-function CodeBlock({ className, children, ...props }: any) {
+function CodeBlock({ className, children, chatTitle, onExpand, ...props }: any) {
   const [copied, setCopied] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'downloaded'>('idle');
   const [isFullScreen, setIsFullScreen] = useState(false);
   const match = /language-(\w+)/.exec(className || "");
   const isInline = !match && !String(children).includes('\n');
@@ -2036,81 +2144,137 @@ function CodeBlock({ className, children, ...props }: any) {
   };
 
   return (
-    <div className="my-4 rounded-xl overflow-hidden border border-white/10 bg-[#0d0d0d] shadow-xl">
+    <div 
+      className="my-4 rounded-xl overflow-hidden border border-white/10 bg-[#0d0d0d] shadow-xl transition-all duration-500 hover:border-violet-500/30 hover:shadow-[0_0_30px_rgba(139,92,246,0.1)] group/block"
+    >
       <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 border-b border-white/10">
         <span className="text-xs font-mono text-white/50 lowercase">{language}</span>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setIsFullScreen(true)}
-            className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+            onClick={() => onExpand(String(children).replace(/\n$/, ""), language, chatTitle || "Untitled")}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-violet-300 hover:bg-white/10 hover:border-violet-500/30 active:scale-95 transition-all duration-300 bg-white/5 border border-white/5 group/btn"
             title="Expand to Full Screen"
           >
-            <Maximize2 className="w-3.5 h-3.5" />
-            <span>Expand</span>
+            <Maximize2 className="w-3.5 h-3.5 pointer-events-none transition-transform group-hover/btn:rotate-12" />
+            <span className="pointer-events-none">Expand</span>
           </button>
           <button
             onClick={() => {
-              const blob = new Blob([String(children).replace(/\n$/, "")], { type: 'text/plain' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              let ext = "txt";
-              if (language === "javascript") ext = "js";
-              else if (language === "python") ext = "py";
-              else if (language === "typescript") ext = "ts";
-              else if (language === "html") ext = "html";
-              else if (language === "css") ext = "css";
-              else if (language !== "text") ext = language;
-              a.download = `code_snippet.${ext}`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
+              if (downloadStatus !== 'idle') return;
+              
+              const codeText = String(children).replace(/\n$/, "");
+              
+              // 1. Try to extract filename from code comments
+              const extractFilename = (code: string) => {
+                const lines = code.split('\n').slice(0, 5);
+                for (const line of lines) {
+                  // Look for patterns like // filename: app.js, # file: main.py, or even just // index.js
+                  const match = line.match(/(?:\/\/|#|--|\/\*)\s*(?:filename|file|title)?[:\s]*([a-zA-Z0-9._-]+\.[a-zA-Z0-9]+)/i);
+                  if (match) return match[1];
+                }
+                return null;
+              };
+
+              const extractedName = extractFilename(codeText);
+              
+              setDownloadStatus('downloading');
+
+              // Simulate download delay for animation
+              setTimeout(() => {
+                const blob = new Blob([codeText], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                let fileName = extractedName;
+                if (!fileName) {
+                  let ext = "txt";
+                  if (language === "javascript") ext = "js";
+                  else if (language === "python") ext = "py";
+                  else if (language === "typescript") ext = "ts";
+                  else if (language === "html") ext = "html";
+                  else if (language === "css") ext = "css";
+                  else if (language !== "text") ext = language;
+                  
+                  const safeTitle = chatTitle ? chatTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase() : "code_snippet";
+                  fileName = `${safeTitle}.${ext}`;
+                }
+                
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                setDownloadStatus('downloaded');
+                setTimeout(() => setDownloadStatus('idle'), 2500);
+              }, 800);
             }}
-            className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+            disabled={downloadStatus !== 'idle'}
+            className={cn(
+              "relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] uppercase tracking-wider font-bold transition-all duration-300 active:scale-95 border border-white/5 group/btn",
+              downloadStatus === 'downloading' ? "text-fuchsia-400 bg-fuchsia-500/10 cursor-wait" : 
+              downloadStatus === 'downloaded' ? "text-emerald-400 bg-emerald-500/10" : 
+              "text-white/40 hover:text-fuchsia-300 hover:bg-white/10 hover:border-fuchsia-500/30 bg-white/5"
+            )}
             title="Download Code"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Download</span>
+            {downloadStatus === 'downloaded' && (
+              <span
+                className="pointer-events-none absolute left-1/2 bottom-full mb-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest text-white whitespace-nowrap z-50"
+                style={{
+                  background: "linear-gradient(135deg, #10b981, #059669)",
+                  boxShadow: "0 4px 15px rgba(16,185,129,0.5)",
+                  animation: "downloaded-toast 1.8s ease forwards",
+                }}
+              >
+                ✓ Downloaded!
+              </span>
+            )}
+            
+            {downloadStatus === 'downloading' ? (
+              <LoaderIcon className="w-3.5 h-3.5 animate-spin pointer-events-none" />
+            ) : downloadStatus === 'downloaded' ? (
+              <Check className="w-3.5 h-3.5 animate-[check-pop_0.3s_ease_forwards] pointer-events-none" />
+            ) : (
+              <Download className="w-3.5 h-3.5 transition-transform group-hover/btn:-translate-y-0.5 pointer-events-none" />
+            )}
+            
+            <span className="pointer-events-none">
+              {downloadStatus === 'downloading' ? "Downloading..." : 
+               downloadStatus === 'downloaded' ? "Done!" : "Download"}
+            </span>
           </button>
           <button
             onClick={handleCopy}
-            className="relative flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+            className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] uppercase tracking-wider font-bold hover:bg-white/10 active:scale-95 transition-all duration-300 bg-white/5 border border-white/5 select-none overflow-visible group/btn"
+            style={{ color: copied ? "rgb(52 211 153)" : "rgba(255,255,255,0.4)" }}
+            title="Copy Code"
           >
-            <AnimatePresence mode="wait">
+            {/* Floating "Copied!" toast — pure CSS, no re-render */}
+            {copied && (
+              <span
+                className="pointer-events-none absolute left-1/2 bottom-full mb-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest text-white whitespace-nowrap z-50"
+                style={{
+                  background: "linear-gradient(135deg, #7c3aed, #a855f7)",
+                  boxShadow: "0 4px 15px rgba(139,92,246,0.5)",
+                  animation: "copied-toast 1.8s ease forwards",
+                }}
+              >
+                ✓ Copied!
+              </span>
+            )}
+            <span
+              className="w-3.5 h-3.5 flex items-center justify-center shrink-0 pointer-events-none"
+              style={copied ? { animation: "check-pop 0.3s ease forwards" } : {}}
+            >
               {copied ? (
-                <motion.div
-                  key="check"
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                >
-                  <Check className="w-3.5 h-3.5 text-green-400" />
-                </motion.div>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
-                <motion.div
-                  key="copy"
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </motion.div>
+                <Copy className="w-3.5 h-3.5 transition-transform group-hover/btn:scale-110" />
               )}
-            </AnimatePresence>
-            <span>{copied ? "Copied" : "Copy"}</span>
-            <AnimatePresence>
-              {copied && (
-                <motion.div
-                  initial={{ opacity: 0, y: 5, scale: 0.8 }}
-                  animate={{ opacity: 1, y: -25, scale: 1 }}
-                  exit={{ opacity: 0, y: -35, scale: 0.8 }}
-                  className="absolute left-1/2 -translate-x-1/2 px-2 py-1 bg-violet-600 text-white text-[9px] font-bold rounded-md shadow-lg pointer-events-none uppercase tracking-widest z-50"
-                >
-                  Copied
-                </motion.div>
-              )}
-            </AnimatePresence>
+            </span>
+            <span className="pointer-events-none">{copied ? "Copied!" : "Copy"}</span>
           </button>
         </div>
       </div>
@@ -2129,58 +2293,6 @@ function CodeBlock({ className, children, ...props }: any) {
           {String(children).replace(/\n$/, "")}
         </SyntaxHighlighter>
       </div>
-
-      <AnimatePresence>
-        {isFullScreen && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-0 z-[100] flex flex-col bg-[#0d0d0d] p-6"
-          >
-            <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-mono text-white/50 lowercase bg-white/5 px-2 py-1 rounded-md">{language}</span>
-                <h3 className="text-sm font-medium text-white/80">Full Screen Code View</h3>
-              </div>
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-white/60 hover:text-white/90 transition-all border border-white/10"
-                >
-                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-                  <span>{copied ? "Copied" : "Copy Code"}</span>
-                </button>
-                <button
-                  onClick={() => setIsFullScreen(false)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-red-500/20 rounded-xl text-xs font-bold text-white/60 hover:text-red-400 transition-all border border-white/10 hover:border-red-500/30"
-                >
-                  <Minimize2 className="w-4 h-4" />
-                  <span>Close</span>
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto custom-scrollbar rounded-xl bg-black/40 border border-white/5">
-              <SyntaxHighlighter
-                language={language === "text" ? "javascript" : language}
-                style={vscDarkPlus}
-                PreTag="div"
-                customStyle={{
-                  margin: 0,
-                  background: "transparent",
-                  padding: "2rem",
-                  fontSize: "14px",
-                  lineHeight: "1.6",
-                }}
-                showLineNumbers={true}
-                wrapLongLines={false}
-              >
-                {String(children).replace(/\n$/, "")}
-              </SyntaxHighlighter>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
