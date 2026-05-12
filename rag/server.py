@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from vector import ingest_file, clear_collection, clear_all_collections
 from rag_chain import query
 from image_gen import generate_image
+from research_agent import run_research
 
 # ─── App setup ────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,12 @@ class ImageGenRequest(BaseModel):
 class ImageAnalyzeRequest(BaseModel):
     image_base64: str
     question: str = "Describe this image in detail."
+
+class ResearchRequest(BaseModel):
+    query: str
+    provider: str = "ollama"
+    model: str = "gemma2:2b"
+    api_key: str = ""
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -155,6 +162,30 @@ async def clear_session(body: ClearRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return JSONResponse({"message": "Session cleared."})
+
+
+@app.post("/api/research")
+async def research_query(body: ResearchRequest):
+    """
+    Run the multi-step Research Agent:
+      1. Planner   — breaks query into sub-questions
+      2. Searcher  — DuckDuckGo search for each sub-question
+      3. Synthesizer — combines findings into a structured Markdown answer
+    """
+    if not body.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+    log.info(f"[Research] Starting research for: {body.query[:80]}")
+    try:
+        answer = run_research(
+            query=body.query,
+            provider=body.provider,
+            model=body.model,
+            api_key=body.api_key,
+        )
+        return JSONResponse({"answer": answer})
+    except Exception as e:
+        log.error(f"[Research] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Research agent error: {str(e)}")
 
 
 @app.post("/analyze-image")

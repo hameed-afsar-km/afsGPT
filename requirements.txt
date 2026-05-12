@@ -9,3 +9,6 @@ pypdf
 pandas
 openpyxl
 pysqlite3-binary
+langgraph
+duckduckgo-search
+ddgs

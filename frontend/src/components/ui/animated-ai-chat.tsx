@@ -28,6 +28,8 @@ import {
   ImageIcon,
   Maximize2,
   Minimize2,
+  Globe,
+  Telescope,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -239,6 +241,8 @@ export function AnimatedAIChat() {
   const [isPullingModel, setIsPullingModel] = useState(false);
   const [isModelInstalled, setIsModelInstalled] = useState(false);
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; language: string; title: string } | null>(null);
+  const [isResearchMode, setIsResearchMode] = useState(false);
+  const [isResearching, setIsResearching] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -530,7 +534,29 @@ export function AnimatedAIChat() {
 
           let responseContent: string;
 
-          if (ragSessionId) {
+          if (isResearchMode) {
+            // ── Research Agent mode ───────────────────────────
+            setIsResearching(true);
+            const provider = localStorage.getItem("afs-provider") || "ollama";
+            const rawModel = localStorage.getItem("afs-model");
+            const model = (rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)" ? "gemma2:2b" : rawModel) || "gemma2:2b";
+            const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+            const apiKey = keys[provider] || "";
+
+            const resRes = await fetch("/api/research", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({ query: content, provider, model, apiKey }),
+            });
+            const resData = await resRes.json();
+            setIsResearching(false);
+            if (resData.error) {
+              responseContent = `❌ Research Error: ${resData.error}`;
+            } else {
+              responseContent = `> 🌐 *Researched from the web using Afs AI Research Agent*\n\n${resData.answer}`;
+            }
+          } else if (ragSessionId) {
             // ── RAG mode: query the document ──────────────────
             const ragRes = await fetch("/api/rag/query", {
               method: "POST",
@@ -1518,6 +1544,34 @@ export function AnimatedAIChat() {
                       </div>
                     </motion.div>
                   )}
+                  {isResearching && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex justify-start"
+                    >
+                      <div className="bg-cyan-500/[0.05] border border-cyan-500/[0.2] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-xl shadow-2xl ml-4 flex items-center gap-4">
+                        <div className="relative w-7 h-7 flex items-center justify-center">
+                          <motion.div
+                            className="absolute inset-0 rounded-full border-2 border-cyan-400/40"
+                            animate={{ scale: [1, 1.5, 1], opacity: [0.6, 0, 0.6] }}
+                            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                          />
+                          <Globe className="w-4 h-4 text-cyan-400" />
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <motion.span
+                            className="text-[11px] font-black uppercase tracking-[0.2em] bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-white to-sky-400 bg-[length:200%_auto]"
+                            animate={{ backgroundPosition: ["200% center", "-200% center"] }}
+                            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                          >
+                            Researching the web
+                          </motion.span>
+                          <span className="text-[9px] text-cyan-400/60 uppercase tracking-wider">Plan · Search · Synthesize</span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1859,6 +1913,21 @@ export function AnimatedAIChat() {
               )}
             >
               <ImageIcon className="w-5 h-5" />
+            </motion.button>
+            {/* Research Mode Toggle */}
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setIsResearchMode(prev => !prev)}
+              title={isResearchMode ? "Research Mode ON — Click to disable" : "Enable Deep Web Research Mode"}
+              className={cn(
+                "p-2.5 rounded-xl transition-all duration-300",
+                isResearchMode
+                  ? "text-cyan-400 bg-cyan-500/15 shadow-[0_0_14px_rgba(34,211,238,0.3)] border border-cyan-500/30"
+                  : "text-white/30 hover:text-cyan-400 hover:bg-cyan-500/10 border border-transparent",
+              )}
+            >
+              <Globe className="w-5 h-5" />
             </motion.button>
             <div className="h-6 w-[1px] bg-white/10 mx-1" />
             <ProviderSelector />
