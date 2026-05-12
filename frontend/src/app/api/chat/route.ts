@@ -8,6 +8,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Provider and model are required" }, { status: 400 });
         }
 
+        const SYSTEM_PROMPT = "You are Afs AI, a high-end AI assistant. Always format your responses beautifully using Markdown. Use bold for emphasis, create clean lists when appropriate, and use code blocks for any technical content. Maintain a professional yet friendly tone. If providing code, ensure it is complete and properly commented.";
+        
+        const formattedMessages = [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...messages.map((m: any) => ({ role: m.role, content: m.content }))
+        ];
+
         // Handle different providers
         if (provider === "ollama") {
             try {
@@ -15,7 +22,7 @@ export async function POST(req: NextRequest) {
                     method: "POST",
                     body: JSON.stringify({
                         model: model,
-                        messages: messages.map((m: any) => ({ role: m.role, content: m.content })),
+                        messages: formattedMessages,
                         stream: false
                     })
                 });
@@ -40,7 +47,7 @@ export async function POST(req: NextRequest) {
                     },
                     body: JSON.stringify({
                         model: model,
-                        messages: messages.map((m: any) => ({ role: m.role, content: m.content }))
+                        messages: formattedMessages
                     })
                 });
                 if (response.ok) {
@@ -61,10 +68,11 @@ export async function POST(req: NextRequest) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        contents: messages.map((m: any) => ({
+                        contents: formattedMessages.filter(m => m.role !== "system").map((m: any) => ({
                             role: m.role === "assistant" ? "model" : "user",
                             parts: [{ text: m.content }]
-                        }))
+                        })),
+                        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] }
                     })
                 });
                 if (response.ok) {
@@ -91,7 +99,8 @@ export async function POST(req: NextRequest) {
                     body: JSON.stringify({
                         model: model,
                         max_tokens: 1024,
-                        messages: messages.map((m: any) => ({ role: m.role, content: m.content }))
+                        system: SYSTEM_PROMPT,
+                        messages: formattedMessages.filter(m => m.role !== "system")
                     })
                 });
                 if (response.ok) {

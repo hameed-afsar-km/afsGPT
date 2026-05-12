@@ -4,6 +4,16 @@ Supports PDF, TXT, CSV, and XLSX file types.
 """
 
 import os
+import sys
+
+# Workaround for ChromaDB on Linux/Render (outdated system sqlite)
+try:
+    __import__('pysqlite3')
+    import sys
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    pass
+
 import pandas as pd
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings

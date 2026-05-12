@@ -26,6 +26,8 @@ import {
   AlertCircle,
   Square,
   ImageIcon,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -2013,6 +2015,7 @@ if (typeof document !== "undefined") {
 
 function CodeBlock({ className, children, ...props }: any) {
   const [copied, setCopied] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   const match = /language-(\w+)/.exec(className || "");
   const isInline = !match && !String(children).includes('\n');
 
@@ -2037,6 +2040,14 @@ function CodeBlock({ className, children, ...props }: any) {
       <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 border-b border-white/10">
         <span className="text-xs font-mono text-white/50 lowercase">{language}</span>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsFullScreen(true)}
+            className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-white/40 hover:text-white/80 transition-colors"
+            title="Expand to Full Screen"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+            <span>Expand</span>
+          </button>
           <button
             onClick={() => {
               const blob = new Blob([String(children).replace(/\n$/, "")], { type: 'text/plain' });
@@ -2118,6 +2129,58 @@ function CodeBlock({ className, children, ...props }: any) {
           {String(children).replace(/\n$/, "")}
         </SyntaxHighlighter>
       </div>
+
+      <AnimatePresence>
+        {isFullScreen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[100] flex flex-col bg-[#0d0d0d] p-6"
+          >
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-mono text-white/50 lowercase bg-white/5 px-2 py-1 rounded-md">{language}</span>
+                <h3 className="text-sm font-medium text-white/80">Full Screen Code View</h3>
+              </div>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-white/60 hover:text-white/90 transition-all border border-white/10"
+                >
+                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  <span>{copied ? "Copied" : "Copy Code"}</span>
+                </button>
+                <button
+                  onClick={() => setIsFullScreen(false)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-red-500/20 rounded-xl text-xs font-bold text-white/60 hover:text-red-400 transition-all border border-white/10 hover:border-red-500/30"
+                >
+                  <Minimize2 className="w-4 h-4" />
+                  <span>Close</span>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto custom-scrollbar rounded-xl bg-black/40 border border-white/5">
+              <SyntaxHighlighter
+                language={language === "text" ? "javascript" : language}
+                style={vscDarkPlus}
+                PreTag="div"
+                customStyle={{
+                  margin: 0,
+                  background: "transparent",
+                  padding: "2rem",
+                  fontSize: "14px",
+                  lineHeight: "1.6",
+                }}
+                showLineNumbers={true}
+                wrapLongLines={false}
+              >
+                {String(children).replace(/\n$/, "")}
+              </SyntaxHighlighter>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
