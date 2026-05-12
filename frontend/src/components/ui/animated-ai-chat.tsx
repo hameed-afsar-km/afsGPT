@@ -345,8 +345,12 @@ export function AnimatedAIChat() {
       }
     } else if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (value.trim()) {
-        handleSendMessage();
+      if (value.trim() || attachedImage) {
+        if (attachedImage) {
+          sendImageForAnalysis(value.trim(), attachedImage.base64, attachedImage.name);
+        } else {
+          handleSendMessage();
+        }
       }
     }
   };
@@ -378,7 +382,8 @@ export function AnimatedAIChat() {
 
       if (!bypassCodeCheck) {
         const provider = localStorage.getItem("afs-provider");
-        const model = localStorage.getItem("afs-model");
+        const rawModel = localStorage.getItem("afs-model");
+        const model = rawModel === "Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)" ? "qwen2.5-coder:7b" : rawModel;
         const codeKeywords = ["code", "function", "script", "python", "javascript", "react", "html", "css", "bug", "debug", "api"];
         const isCodeRelated = codeKeywords.some(keyword => content.toLowerCase().includes(keyword));
         
@@ -541,7 +546,8 @@ export function AnimatedAIChat() {
           } else {
             // ── Normal AI chat mode ───────────────────────────
             const provider = localStorage.getItem("afs-provider");
-            const model = localStorage.getItem("afs-model");
+            const rawModel = localStorage.getItem("afs-model");
+            const model = rawModel === "Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)" ? "qwen2.5-coder:7b" : rawModel;
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = provider ? keys[provider] : "";
 
@@ -715,10 +721,40 @@ export function AnimatedAIChat() {
   const handleImageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Optimize: Resize image before sending to speed up analysis
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const base64 = ev.target?.result as string;
-      setAttachedImage({ base64, name: file.name });
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_WIDTH = 768;
+        const MAX_HEIGHT = 768;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        // Use compressed JPEG for faster transfer and processing
+        const base64 = canvas.toDataURL("image/jpeg", 0.8);
+        setAttachedImage({ base64, name: file.name });
+      };
+      img.src = ev.target?.result as string;
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -756,10 +792,13 @@ export function AnimatedAIChat() {
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
-      if (activeChatId) {
-        await sendMessageToFirestore(activeChatId, userMessage);
-        await sendMessageToFirestore(activeChatId, assistantMessage);
+      let chatId = activeChatId;
+      if (!chatId) {
+        chatId = await createNewChat(question || "Image Analysis");
       }
+
+      await sendMessageToFirestore(chatId, userMessage);
+      await sendMessageToFirestore(chatId, assistantMessage);
     } catch (err) {
       console.error("Image analysis error:", err);
       setMessages((prev) => [
@@ -1067,7 +1106,7 @@ export function AnimatedAIChat() {
 
                   <motion.div
                     layoutId="input-box"
-                    className="backdrop-blur-3xl bg-white/[0.02] rounded-2xl border border-white/[0.08]"
+                    className="backdrop-blur-xl bg-white/[0.02] rounded-2xl border border-white/[0.08]"
                     transition={{ type: "spring", damping: 25, stiffness: 120 }}
                   >
                     {renderInputContent()}
@@ -1139,7 +1178,7 @@ export function AnimatedAIChat() {
                       >
                         <div
                           className={cn(
-                            "w-full rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-3xl border transition-all duration-500",
+                            "w-full rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-xl border transition-all duration-500",
                             editingMessageIndex === idx
                               ? "bg-white/[0.05] border-white/[0.12] shadow-2xl"
                               : msg.role === "user"
@@ -1419,7 +1458,7 @@ export function AnimatedAIChat() {
                       animate={{ opacity: 1, x: 0 }}
                       className="flex justify-start"
                     >
-                      <div className="bg-white/[0.03] border border-white/[0.05] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-3xl shadow-2xl ml-4">
+                      <div className="bg-white/[0.03] border border-white/[0.05] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-xl shadow-2xl ml-4">
                         <ThinkingLoader />
                       </div>
                     </motion.div>
@@ -1430,7 +1469,7 @@ export function AnimatedAIChat() {
                       animate={{ opacity: 1, x: 0 }}
                       className="flex justify-start"
                     >
-                      <div className="bg-white/[0.03] border border-fuchsia-500/[0.15] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-3xl shadow-2xl ml-4 flex items-center gap-3">
+                      <div className="bg-white/[0.03] border border-fuchsia-500/[0.15] rounded-[2.2rem] rounded-tl-none px-7 py-5 backdrop-blur-xl shadow-2xl ml-4 flex items-center gap-3">
                         <div className="flex gap-1.5">
                           {[0, 1, 2].map((i) => (
                             <motion.div
@@ -1463,7 +1502,7 @@ export function AnimatedAIChat() {
             <div className="max-w-4xl mx-auto px-6 pb-6">
               <motion.div
                 layoutId="input-box"
-                className="pointer-events-auto backdrop-blur-3xl bg-white/[0.05] rounded-[1.5rem] border border-white/[0.08]"
+                className="pointer-events-auto backdrop-blur-xl bg-white/[0.05] rounded-[1.5rem] border border-white/[0.08]"
                 transition={{ type: "spring", damping: 25, stiffness: 120 }}
               >
                 {renderInputContent()}
@@ -1482,7 +1521,7 @@ export function AnimatedAIChat() {
           {showCommandPalette && (
             <motion.div
               ref={commandPaletteRef}
-              className="fixed left-1/2 -translate-x-1/2 bottom-[140px] w-full max-w-lg backdrop-blur-3xl bg-[#0A0A0B]/90 rounded-3xl z-50 border border-white/10 overflow-hidden p-3"
+              className="fixed left-1/2 -translate-x-1/2 bottom-[140px] w-full max-w-lg backdrop-blur-xl bg-[#0A0A0B]/90 rounded-3xl z-50 border border-white/10 overflow-hidden p-3"
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
@@ -1541,6 +1580,7 @@ export function AnimatedAIChat() {
                 <img
                   src={attachedImage.base64}
                   alt={attachedImage.name}
+                  title={attachedImage.name}
                   className="h-14 w-14 rounded-xl object-cover border border-white/10"
                 />
                 <button
@@ -1549,10 +1589,6 @@ export function AnimatedAIChat() {
                 >
                   <XIcon className="w-2.5 h-2.5 text-white" />
                 </button>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-xs font-medium text-white/70 truncate max-w-[200px]">{attachedImage.name}</span>
-                <span className="text-[10px] text-violet-400/60 uppercase tracking-widest">Ready for LLaVA Analysis</span>
               </div>
             </motion.div>
           )}

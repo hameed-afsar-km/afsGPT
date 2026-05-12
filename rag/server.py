@@ -73,7 +73,7 @@ class ImageAnalyzeRequest(BaseModel):
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...), session_id: Optional[str] = Form(None)):
+def upload_file(file: UploadFile = File(...), session_id: Optional[str] = Form(None)):
     """
     Receive an uploaded file, save it temporarily,
     ingest into a unique ChromaDB collection, return a session_id.
@@ -114,7 +114,7 @@ async def upload_file(file: UploadFile = File(...), session_id: Optional[str] = 
 
 
 @app.post("/query")
-async def ask_question(body: QueryRequest):
+def ask_question(body: QueryRequest):
     """Answer a question using the documents in a given session collection."""
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
@@ -156,43 +156,39 @@ async def clear_session(body: ClearRequest):
 
 
 @app.post("/analyze-image")
-async def analyze_image(body: ImageAnalyzeRequest):
+def analyze_image(body: ImageAnalyzeRequest):
     """Analyze an image using LLaVA via Ollama."""
     if not body.image_base64.strip():
         raise HTTPException(status_code=400, detail="Image data cannot be empty.")
 
     import base64
-    import tempfile
     import ollama
 
     try:
-        # Decode base64 to a temp image file
+        log.info(f"Received image analysis request. Question: {body.question[:50]}...")
+        # Pass the raw base64 string directly to Ollama
+        # Ollama supports direct base64 strings in the images array
         header, _, data = body.image_base64.partition(",")
-        image_bytes = base64.b64decode(data if data else body.image_base64)
+        clean_base64 = data if data else body.image_base64
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp.write(image_bytes)
-            tmp_path = tmp.name
-
+        log.info(f"Calling Ollama with model llama3.2-vision:latest... (Image size: {len(clean_base64)} chars)")
         response = ollama.chat(
-            model="llava",
+            model="llama3.2-vision:latest",
             messages=[
                 {
                     "role": "user",
                     "content": body.question,
-                    "images": [tmp_path]
+                    "images": [clean_base64]
                 }
             ]
         )
 
-        os.unlink(tmp_path)
-
         answer = response["message"]["content"]
-        log.info("LLaVA analysis completed.")
+        log.info("LLaVA analysis completed successfully.")
         return JSONResponse({"answer": answer})
 
     except Exception as e:
-        log.error(f"LLaVA analysis error: {e}")
+        log.error(f"LLaVA analysis error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -44,6 +44,7 @@ export function ProviderSelector() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+    const [ollamaMode, setOllamaMode] = useState<"default" | "custom">("default");
     const [mounted, setMounted] = useState(false);
 
 
@@ -95,10 +96,27 @@ export function ProviderSelector() {
                 setModels([]);
             } else {
                 setModels(data.models || []);
-                // If current selected model isn't in the list, clear it or pick first
-                if (data.models?.length > 0 && (!selectedModel || !data.models.includes(selectedModel))) {
-                    const firstModel = data.models[0];
-                    setSelectedModel(firstModel);
+                
+                if (data.models?.length > 0) {
+                    if (selectedModel && !data.models.includes(selectedModel)) {
+                        if (targetProvider === "ollama" && selectedModel === "Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)") {
+                            setOllamaMode("default");
+                        } else if (targetProvider === "ollama") {
+                            // It's a real custom model that they entered manually before, or we don't have the tag
+                            setOllamaMode("custom");
+                        } else {
+                            setSelectedModel(data.models[0]);
+                        }
+                    } else if (!selectedModel) {
+                        if (targetProvider === "ollama") {
+                            setOllamaMode("default");
+                            setSelectedModel("Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)");
+                        } else {
+                            setSelectedModel(data.models[0]);
+                        }
+                    } else if (targetProvider === "ollama") {
+                        setOllamaMode("custom");
+                    }
                 }
             }
         } catch (err) {
@@ -122,7 +140,9 @@ export function ProviderSelector() {
 
     const handleApply = () => {
         if (selectedProvider) localStorage.setItem("afs-provider", selectedProvider);
-        if (selectedModel) localStorage.setItem("afs-model", selectedModel);
+        if (selectedModel) {
+            localStorage.setItem("afs-model", selectedModel);
+        }
         setIsOpen(false);
     };
 
@@ -138,9 +158,9 @@ export function ProviderSelector() {
     const activeProvider = providers.find(p => p.id === selectedProvider);
     const [searchQuery, setSearchQuery] = useState("");
 
-    const filteredModels = models.filter(m => 
-        m.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredModels = selectedProvider === "ollama" && ollamaMode === "default" 
+        ? ["Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)"]
+        : models.filter(m => m.toLowerCase().includes(searchQuery.toLowerCase()));
 
     return (
         <div className="relative">
@@ -307,7 +327,24 @@ export function ProviderSelector() {
                                             </div>
                                         ) : (
                                             <div className="p-6 flex flex-col h-full space-y-4">
-                                                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
+                                                {selectedProvider === "ollama" && (
+                                                    <div className="flex p-1 bg-white/5 rounded-xl border border-white/10 shrink-0">
+                                                        <button
+                                                            onClick={() => { setOllamaMode("default"); setSelectedModel("Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)"); }}
+                                                            className={cn("flex-1 text-xs py-2 rounded-lg font-bold transition-all", ollamaMode === "default" ? "bg-violet-500/20 text-violet-300 shadow-sm" : "text-white/40 hover:text-white/70")}
+                                                        >
+                                                            Use default models
+                                                        </button>
+                                                        <button
+                                                            onClick={() => { setOllamaMode("custom"); if (models.length > 0) setSelectedModel(models[0]); }}
+                                                            className={cn("flex-1 text-xs py-2 rounded-lg font-bold transition-all", ollamaMode === "custom" ? "bg-violet-500/20 text-violet-300 shadow-sm" : "text-white/40 hover:text-white/70")}
+                                                        >
+                                                            Custom Models
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-4 py-2 shrink-0">
                                                     <Search className="w-4 h-4 text-white/20" />
                                                     <input 
                                                         type="text"
@@ -339,27 +376,28 @@ export function ProviderSelector() {
                                                     ) : filteredModels.length > 0 ? (
                                                         <div className="grid grid-cols-1 gap-1.5">
                                                             {filteredModels.map((model) => (
-                                                                <button
-                                                                    key={model}
-                                                                    onClick={() => handleModelSelect(model)}
-                                                                    className={cn(
-                                                                        "w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm transition-all group relative overflow-hidden",
-                                                                        selectedModel === model
-                                                                            ? "bg-violet-500/10 text-white border border-violet-500/20"
-                                                                            : "text-white/40 hover:bg-white/5 hover:text-white/80 border border-transparent"
-                                                                    )}
-                                                                >
-                                                                    <div className="flex items-center gap-3 relative z-10">
-                                                                        <div className={cn(
-                                                                            "w-2 h-2 rounded-full transition-all",
-                                                                            selectedModel === model ? "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.6)]" : "bg-white/10"
-                                                                        )} />
-                                                                        <span className="font-medium">{model}</span>
-                                                                    </div>
-                                                                    {selectedModel === model && (
-                                                                        <Check className="w-4 h-4 text-violet-400 relative z-10" />
-                                                                    )}
-                                                                </button>
+                                                                <div key={model} className="flex flex-col gap-2">
+                                                                    <button
+                                                                        onClick={() => handleModelSelect(model)}
+                                                                        className={cn(
+                                                                            "w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm transition-all group relative overflow-hidden",
+                                                                            selectedModel === model
+                                                                                ? "bg-violet-500/10 text-white border border-violet-500/20"
+                                                                                : "text-white/40 hover:bg-white/5 hover:text-white/80 border border-transparent"
+                                                                        )}
+                                                                    >
+                                                                        <div className="flex items-center gap-3 relative z-10">
+                                                                            <div className={cn(
+                                                                                "w-2 h-2 rounded-full transition-all",
+                                                                                selectedModel === model ? "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.6)]" : "bg-white/10"
+                                                                            )} />
+                                                                            <span className="font-medium">{model}</span>
+                                                                        </div>
+                                                                        {selectedModel === model && (
+                                                                            <Check className="w-4 h-4 text-violet-400 relative z-10" />
+                                                                        )}
+                                                                    </button>
+                                                                </div>
                                                             ))}
                                                         </div>
                                                     ) : (
