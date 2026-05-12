@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Provider and model are required" }, { status: 400 });
         }
 
-        const SYSTEM_PROMPT = "You are Afs AI, a high-end AI assistant. Always format your responses beautifully using Markdown. Use bold for emphasis, create clean lists when appropriate, and use code blocks for any technical content. Maintain a professional yet friendly tone. If providing code, ensure it is complete and properly commented.";
+        const SYSTEM_PROMPT = "You are Afs AI, a high-end AI assistant. Always format your responses beautifully using Markdown. Use bold for emphasis and clean lists. CRITICAL: Whenever you provide content that represents a file (like code, a README.md, a text file, or any technical document), you MUST wrap it in a triple-backtick markdown code block with the appropriate language label. For README files, use ```markdown. For text files, use ```text. This ensures the user can use the Copy, Download, and Expand features on all technical content. Always include a comment on the first line with the filename, like '// filename: index.js' or '<!-- filename: README.md -->'.";
         
         const formattedMessages = [
             { role: "system", content: SYSTEM_PROMPT },

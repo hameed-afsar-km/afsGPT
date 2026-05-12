@@ -1411,7 +1411,16 @@ export function AnimatedAIChat() {
                                           {children}
                                         </strong>
                                       ),
-                                      pre: ({ children }) => <>{children}</>,
+                                      pre: ({ children }: any) => {
+                                        const codeProps = children?.props || {};
+                                        return (
+                                          <CodeBlock 
+                                            {...codeProps}
+                                            chatTitle={activeChatTitle} 
+                                            onExpand={(code: string, lang: string, title: string) => setFullscreenCode({ code, language: lang, title })} 
+                                          />
+                                        );
+                                      },
                                       code: (props: any) => (
                                         <CodeBlock 
                                           {...props} 
@@ -1956,7 +1965,16 @@ function TypewriterText({
             {children}
           </strong>
         ),
-        pre: ({ children }) => <>{children}</>,
+        pre: ({ children }: any) => {
+          const codeProps = children?.props || {};
+          return (
+            <CodeBlock 
+              {...codeProps}
+              chatTitle={chatTitle} 
+              onExpand={onExpand} 
+            />
+          );
+        },
         code: (props: any) => (
           <CodeBlock 
             {...props} 
