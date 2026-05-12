@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     console.log(`[${requestId}] Fetching from backend: ${backendUrl}/analyze-image`);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
     try {
       const res = await fetch(`${backendUrl}/analyze-image`, {

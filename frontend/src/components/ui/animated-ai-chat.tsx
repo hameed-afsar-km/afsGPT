@@ -383,11 +383,11 @@ export function AnimatedAIChat() {
       if (!bypassCodeCheck) {
         const provider = localStorage.getItem("afs-provider");
         const rawModel = localStorage.getItem("afs-model");
-        const model = rawModel === "Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)" ? "qwen2.5-coder:7b" : rawModel;
+        const model = rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)" ? "qwen2.5-coder:1.5b" : rawModel;
         const codeKeywords = ["code", "function", "script", "python", "javascript", "react", "html", "css", "bug", "debug", "api"];
         const isCodeRelated = codeKeywords.some(keyword => content.toLowerCase().includes(keyword));
         
-        if (provider === "ollama" && model !== "qwen2.5-coder:7b" && isCodeRelated) {
+        if (provider === "ollama" && model !== "qwen2.5-coder:1.5b" && isCodeRelated) {
           setPendingMessage({ text: content, limit: historyLimit });
           setShowCodeModal(true);
           
@@ -399,7 +399,7 @@ export function AnimatedAIChat() {
               body: JSON.stringify({ provider: "ollama" })
             });
             const data = await res.json();
-            setIsModelInstalled(data.models?.includes("qwen2.5-coder:7b"));
+            setIsModelInstalled(data.models?.includes("qwen2.5-coder:1.5b"));
           } catch (e) {
             setIsModelInstalled(false);
           }
@@ -547,7 +547,14 @@ export function AnimatedAIChat() {
             // ── Normal AI chat mode ───────────────────────────
             const provider = localStorage.getItem("afs-provider");
             const rawModel = localStorage.getItem("afs-model");
-            const model = rawModel === "Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)" ? "qwen2.5-coder:7b" : rawModel;
+            const isDefault = rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)";
+            const codeKeywords = ["code", "function", "script", "python", "javascript", "react", "html", "css", "bug", "debug", "api"];
+            const isCodeRelated = content.toLowerCase().split(/\s+/).some(word => codeKeywords.includes(word));
+            
+            let model = rawModel;
+            if (isDefault) {
+              model = isCodeRelated ? "qwen2.5-coder:1.5b" : "gemma2:2b";
+            }
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = provider ? keys[provider] : "";
 

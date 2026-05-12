@@ -171,10 +171,10 @@ def analyze_image(body: ImageAnalyzeRequest):
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
 
-        log.info(f"Calling Ollama with model llama3.2-vision:latest... (Image size: {len(clean_base64)} chars)")
+        log.info(f"Calling Ollama with model moondream... (Image size: {len(clean_base64)} chars)")
         
         response = ollama.chat(
-            model="llama3.2-vision:latest",
+            model="moondream",
             messages=[
                 {
                     "role": "user",

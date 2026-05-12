@@ -99,7 +99,7 @@ export function ProviderSelector() {
                 
                 if (data.models?.length > 0) {
                     if (selectedModel && !data.models.includes(selectedModel)) {
-                        if (targetProvider === "ollama" && selectedModel === "Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)") {
+                        if (targetProvider === "ollama" && selectedModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)") {
                             setOllamaMode("default");
                         } else if (targetProvider === "ollama") {
                             // It's a real custom model that they entered manually before, or we don't have the tag
@@ -110,7 +110,7 @@ export function ProviderSelector() {
                     } else if (!selectedModel) {
                         if (targetProvider === "ollama") {
                             setOllamaMode("default");
-                            setSelectedModel("Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)");
+                            setSelectedModel("Use default models (Qwen 1.5B + Gemma 2B + Moondream)");
                         } else {
                             setSelectedModel(data.models[0]);
                         }
@@ -159,7 +159,7 @@ export function ProviderSelector() {
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredModels = selectedProvider === "ollama" && ollamaMode === "default" 
-        ? ["Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)"]
+        ? ["Use default models (Qwen 1.5B + Gemma 2B + Moondream)"]
         : models.filter(m => m.toLowerCase().includes(searchQuery.toLowerCase()));
 
     return (
@@ -330,7 +330,7 @@ export function ProviderSelector() {
                                                 {selectedProvider === "ollama" && (
                                                     <div className="flex p-1 bg-white/5 rounded-xl border border-white/10 shrink-0">
                                                         <button
-                                                            onClick={() => { setOllamaMode("default"); setSelectedModel("Use default models (Qwen 2.5 Coder + Llama 3.2 Vision)"); }}
+                                                            onClick={() => { setOllamaMode("default"); setSelectedModel("Use default models (Qwen 1.5B + Gemma 2B + Moondream)"); }}
                                                             className={cn("flex-1 text-xs py-2 rounded-lg font-bold transition-all", ollamaMode === "default" ? "bg-violet-500/20 text-violet-300 shadow-sm" : "text-white/40 hover:text-white/70")}
                                                         >
                                                             Use default models
