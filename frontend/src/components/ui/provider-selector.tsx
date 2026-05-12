@@ -367,7 +367,7 @@ export function ProviderSelector() {
                                                                 <p className="text-xs text-white/30">{error}</p>
                                                             </div>
                                                             <button 
-                                                                onClick={fetchModels}
+                                                                onClick={() => fetchModels()}
                                                                 className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-medium text-white transition-all border border-white/10"
                                                             >
                                                                 Retry Connection

@@ -8,26 +8,40 @@ export async function POST(req: NextRequest) {
     const imageSize = body.image_base64?.length || 0;
     console.log(`[${requestId}] Body parsed. Image size: ${imageSize} chars. Question: ${body.question}`);
     
-    const backendUrl = process.env.RAG_BACKEND_URL || "http://localhost:8001";
+    const backendUrl = process.env.RAG_BACKEND_URL || "http://127.0.0.1:8001";
     console.log(`[${requestId}] Fetching from backend: ${backendUrl}/analyze-image`);
 
-    const res = await fetch(`${backendUrl}/analyze-image`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
 
-    console.log(`[${requestId}] Backend responded with status: ${res.status}`);
+    try {
+      const res = await fetch(`${backendUrl}/analyze-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-    if (!res.ok) {
-      const err = await res.text();
-      console.error(`[${requestId}] Backend error:`, err);
-      return NextResponse.json({ error: err }, { status: res.status });
+      clearTimeout(timeoutId);
+      console.log(`[${requestId}] Backend responded with status: ${res.status}`);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        console.error(`[${requestId}] Backend error:`, err);
+        return NextResponse.json(err, { status: res.status });
+      }
+
+      const data = await res.json();
+      console.log(`[${requestId}] Analysis complete.`);
+      return NextResponse.json(data);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        console.error(`[${requestId}] Request timed out after 120s`);
+        return NextResponse.json({ error: "Image analysis timed out. The model might be taking too long." }, { status: 504 });
+      }
+      throw err;
     }
-
-    const data = await res.json();
-    console.log(`[${requestId}] Analysis complete.`);
-    return NextResponse.json(data);
   } catch (error: any) {
     console.error(`[${requestId}] Analyze Image API Error:`, error);
     return NextResponse.json(

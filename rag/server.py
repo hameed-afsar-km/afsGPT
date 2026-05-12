@@ -14,6 +14,8 @@ import sys
 import uuid
 import shutil
 import logging
+import base64
+import ollama
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
@@ -161,17 +163,16 @@ def analyze_image(body: ImageAnalyzeRequest):
     if not body.image_base64.strip():
         raise HTTPException(status_code=400, detail="Image data cannot be empty.")
 
-    import base64
-    import ollama
-
     try:
         log.info(f"Received image analysis request. Question: {body.question[:50]}...")
+        
         # Pass the raw base64 string directly to Ollama
         # Ollama supports direct base64 strings in the images array
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
 
         log.info(f"Calling Ollama with model llama3.2-vision:latest... (Image size: {len(clean_base64)} chars)")
+        
         response = ollama.chat(
             model="llama3.2-vision:latest",
             messages=[
@@ -180,16 +181,26 @@ def analyze_image(body: ImageAnalyzeRequest):
                     "content": body.question,
                     "images": [clean_base64]
                 }
-            ]
+            ],
+            options={
+                "temperature": 0.2,
+            }
         )
 
-        answer = response["message"]["content"]
-        log.info("LLaVA analysis completed successfully.")
-        return JSONResponse({"answer": answer})
+        if "message" in response and "content" in response["message"]:
+            answer = response["message"]["content"]
+            log.info("LLaVA analysis completed successfully.")
+            return JSONResponse({"answer": answer})
+        else:
+            log.error(f"Unexpected response from Ollama: {response}")
+            raise HTTPException(status_code=500, detail="Ollama returned an empty or malformed response.")
 
     except Exception as e:
-        log.error(f"LLaVA analysis error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_str = str(e)
+        log.error(f"LLaVA analysis error: {error_str}")
+        if "png: invalid format" in error_str:
+            raise HTTPException(status_code=400, detail="The image format is invalid or too small for the model to process.")
+        raise HTTPException(status_code=500, detail=f"Ollama Error: {error_str}")
 
 
 @app.delete("/clear-all")

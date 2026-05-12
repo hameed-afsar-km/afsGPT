@@ -728,8 +728,8 @@ export function AnimatedAIChat() {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 768;
-        const MAX_HEIGHT = 768;
+        const MAX_WIDTH = 512;
+        const MAX_HEIGHT = 512;
         let width = img.width;
         let height = img.height;
 
@@ -751,7 +751,7 @@ export function AnimatedAIChat() {
         ctx?.drawImage(img, 0, 0, width, height);
         
         // Use compressed JPEG for faster transfer and processing
-        const base64 = canvas.toDataURL("image/jpeg", 0.8);
+        const base64 = canvas.toDataURL("image/jpeg", 0.7);
         setAttachedImage({ base64, name: file.name });
       };
       img.src = ev.target?.result as string;
