@@ -164,7 +164,6 @@ export function AnimatedAIChat() {
   const [isRecording, setIsRecording] = useState(false);
   const [isCallOpen, setIsCallOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [activeIntent, setActiveIntent] = useState<string | null>(null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState<number>(-1);
@@ -236,10 +235,22 @@ export function AnimatedAIChat() {
   const [isPullingModel, setIsPullingModel] = useState(false);
   const [isModelInstalled, setIsModelInstalled] = useState(false);
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; language: string; title: string } | null>(null);
-  const [isResearchMode, setIsResearchMode] = useState(false);
+  const [intentsByChat, setIntentsByChat] = useState<Record<string, string | null>>({});
+  const [researchModeByChat, setResearchModeByChat] = useState<Record<string, boolean>>({});
   const [researchingChatIds, setResearchingChatIds] = useState<Set<string>>(new Set());
   const [analyzingImageChatIds, setAnalyzingImageChatIds] = useState<Set<string>>(new Set());
   
+  const currentChatKey = activeChatId || 'new_chat';
+  const activeIntent = intentsByChat[currentChatKey] || null;
+  const isResearchMode = researchModeByChat[currentChatKey] || false;
+
+  const setActiveIntent = (intent: string | null) => {
+    setIntentsByChat(prev => ({ ...prev, [currentChatKey]: intent }));
+  };
+  const setIsResearchMode = (mode: boolean) => {
+    setResearchModeByChat(prev => ({ ...prev, [currentChatKey]: mode }));
+  };
+
   const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
   const isResearching = activeChatId ? researchingChatIds.has(activeChatId) : false;
   const isAnalyzingImage = activeChatId ? analyzingImageChatIds.has(activeChatId) : false;
@@ -488,6 +499,8 @@ export function AnimatedAIChat() {
               if (!isImageRequest && !isResearchMode) {
                 setTypingChatIds(prev => new Set(prev).add(chatId!));
               }
+              if (isResearchMode) setResearchModeByChat(prev => ({ ...prev, [chatId!]: true, 'new_chat': false }));
+              if (activeIntent) setIntentsByChat(prev => ({ ...prev, [chatId!]: activeIntent, 'new_chat': null }));
             }
           }
 
@@ -663,7 +676,7 @@ export function AnimatedAIChat() {
           
           // Clear one-shot intents after message is sent
           if (activeIntent && activeIntent !== "research") {
-            setActiveIntent(null);
+            if (chatId) setIntentsByChat(prev => ({ ...prev, [chatId!]: null }));
           }
         } catch (error: any) {
           if (error.name === "AbortError") {
@@ -844,7 +857,11 @@ export function AnimatedAIChat() {
     let chatId = activeChatId;
     if (!chatId) {
       chatId = await createNewChat(question || "Image Analysis");
-      if (chatId) setGeneratingChatIds(prev => new Set(prev).add(chatId!));
+      if (chatId) {
+        setGeneratingChatIds(prev => new Set(prev).add(chatId!));
+        if (isResearchMode) setResearchModeByChat(prev => ({ ...prev, [chatId!]: true, 'new_chat': false }));
+        if (activeIntent) setIntentsByChat(prev => ({ ...prev, [chatId!]: activeIntent, 'new_chat': null }));
+      }
     }
     if (!chatId) return;
 
@@ -896,6 +913,9 @@ export function AnimatedAIChat() {
         setAnalyzingImageChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
         setGeneratingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
         abortControllersRef.current.delete(chatId);
+        if (activeIntent && activeIntent !== "research") {
+          setIntentsByChat(prev => ({ ...prev, [chatId!]: null }));
+        }
       }
     }
   };
