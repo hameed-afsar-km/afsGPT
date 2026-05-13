@@ -271,9 +271,9 @@ export function AnimatedAIChat() {
       prefix: "/brainstorm",
     },
     {
-      icon: <Search className="w-4 h-4" />,
+      icon: <Globe className="w-4 h-4" />,
       label: "Research",
-      description: "Search for information",
+      description: "Toggle Deep Web Research Mode",
       prefix: "/research",
     },
   ];
@@ -343,11 +343,18 @@ export function AnimatedAIChat() {
         e.preventDefault();
         if (activeSuggestion >= 0) {
           const selectedCommand = commandSuggestions[activeSuggestion];
-          setValue(selectedCommand.prefix + " ");
-          setShowCommandPalette(false);
-
-          setRecentCommand(selectedCommand.label);
-          setTimeout(() => setRecentCommand(null), 3500);
+          if (selectedCommand.prefix === "/research") {
+            setIsResearchMode((prev) => !prev);
+            setValue("");
+            setShowCommandPalette(false);
+            setRecentCommand("Research Mode " + (!isResearchMode ? "ON" : "OFF"));
+            setTimeout(() => setRecentCommand(null), 3000);
+          } else {
+            setValue(selectedCommand.prefix + " ");
+            setShowCommandPalette(false);
+            setRecentCommand(selectedCommand.label);
+            setTimeout(() => setRecentCommand(null), 3500);
+          }
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -889,11 +896,18 @@ export function AnimatedAIChat() {
 
   const selectCommandSuggestion = (index: number) => {
     const selectedCommand = commandSuggestions[index];
-    setValue(selectedCommand.prefix + " ");
-    setShowCommandPalette(false);
-
-    setRecentCommand(selectedCommand.label);
-    setTimeout(() => setRecentCommand(null), 2000);
+    if (selectedCommand.prefix === "/research") {
+      setIsResearchMode((prev) => !prev);
+      setValue("");
+      setShowCommandPalette(false);
+      setRecentCommand("Research Mode " + (!isResearchMode ? "ON" : "OFF"));
+      setTimeout(() => setRecentCommand(null), 2000);
+    } else {
+      setValue(selectedCommand.prefix + " ");
+      setShowCommandPalette(false);
+      setRecentCommand(selectedCommand.label);
+      setTimeout(() => setRecentCommand(null), 2000);
+    }
   };
 
   const toggleRecording = () => {
@@ -1831,6 +1845,16 @@ export function AnimatedAIChat() {
               </motion.div>
             )}
           </AnimatePresence>
+          {isResearchMode && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, x: 20 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              className="absolute top-4 right-6 z-20 flex items-center gap-1.5 px-3 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded-full shadow-[0_0_15px_rgba(34,211,238,0.1)]"
+            >
+              <Globe className="w-3 h-3 text-cyan-400 animate-pulse" />
+              <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em]">Research ON</span>
+            </motion.div>
+          )}
           <Textarea
             ref={textareaRef}
             value={value}
@@ -1860,24 +1884,42 @@ export function AnimatedAIChat() {
 
         <div className="px-5 pb-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            {/* RAG status removed from here and moved to top header */}
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={handleAttachFile}
-              disabled={isUploading}
-              title="Attach document for RAG analysis"
-              className={cn(
-                "p-2.5 rounded-xl transition-colors",
-                isUploading
-                  ? "text-violet-400 cursor-wait opacity-50"
-                  : fileAttachedToNextMessage.length > 0
-                    ? "text-violet-400 bg-violet-500/10 shadow-[0_0_10px_rgba(139,92,246,0.2)]"
-                    : "text-white/30 hover:text-white/90 hover:bg-white/5",
-              )}
-            >
-              <Paperclip className="w-5 h-5" />
-            </motion.button>
+            {/* Grouped Attachments */}
+            <div className="flex items-center gap-0.5 bg-white/5 rounded-xl border border-white/10 p-0.5">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleAttachFile}
+                disabled={isUploading}
+                title="Attach document for RAG analysis"
+                className={cn(
+                  "p-2 rounded-lg transition-colors",
+                  isUploading
+                    ? "text-violet-400 cursor-wait opacity-50"
+                    : fileAttachedToNextMessage.length > 0
+                      ? "text-violet-400 bg-violet-500/10 shadow-[0_0_10px_rgba(139,92,246,0.2)]"
+                      : "text-white/30 hover:text-white/90 hover:bg-white/5",
+                )}
+              >
+                <Paperclip className="w-4.5 h-4.5" />
+              </motion.button>
+              <div className="w-[1px] h-3.5 bg-white/10 mx-0.5" />
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => imageInputRef.current?.click()}
+                title="Upload image for LLaVA analysis"
+                className={cn(
+                  "p-2 rounded-lg transition-colors",
+                  attachedImage
+                    ? "text-fuchsia-400 bg-fuchsia-500/10 shadow-[0_0_10px_rgba(232,121,249,0.2)]"
+                    : "text-white/30 hover:text-fuchsia-400 hover:bg-fuchsia-500/10",
+                )}
+              >
+                <ImageIcon className="w-4.5 h-4.5" />
+              </motion.button>
+            </div>
+
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -1885,6 +1927,7 @@ export function AnimatedAIChat() {
                 e.stopPropagation();
                 setShowCommandPalette((prev) => !prev);
               }}
+              title="Quick Actions"
               className={cn(
                 "p-2.5 rounded-xl transition-colors",
                 showCommandPalette
@@ -1902,35 +1945,6 @@ export function AnimatedAIChat() {
               className="p-2.5 rounded-xl transition-colors text-white/30 hover:text-violet-400 hover:bg-violet-500/10"
             >
               <Mic className="w-5 h-5" />
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => imageInputRef.current?.click()}
-              title="Upload image for LLaVA analysis"
-              className={cn(
-                "p-2.5 rounded-xl transition-colors",
-                attachedImage
-                  ? "text-fuchsia-400 bg-fuchsia-500/10 shadow-[0_0_10px_rgba(232,121,249,0.2)]"
-                  : "text-white/30 hover:text-fuchsia-400 hover:bg-fuchsia-500/10",
-              )}
-            >
-              <ImageIcon className="w-5 h-5" />
-            </motion.button>
-            {/* Research Mode Toggle */}
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setIsResearchMode(prev => !prev)}
-              title={isResearchMode ? "Research Mode ON — Click to disable" : "Enable Deep Web Research Mode"}
-              className={cn(
-                "p-2.5 rounded-xl transition-all duration-300",
-                isResearchMode
-                  ? "text-cyan-400 bg-cyan-500/15 shadow-[0_0_14px_rgba(34,211,238,0.3)] border border-cyan-500/30"
-                  : "text-white/30 hover:text-cyan-400 hover:bg-cyan-500/10 border border-transparent",
-              )}
-            >
-              <Globe className="w-5 h-5" />
             </motion.button>
             <div className="h-6 w-[1px] bg-white/10 mx-1" />
             <ProviderSelector />
