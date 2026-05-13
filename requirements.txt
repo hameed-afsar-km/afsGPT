@@ -2,6 +2,7 @@ langchain_ollama
 langchain_chroma
 langchain_community
 langchain
++
 fastapi
 uvicorn[standard]
 python-multipart

@@ -182,8 +182,6 @@ export function AnimatedAIChat() {
     activeChatTitle,
   } = useChat();
 
-  const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
-  const isGenerating = activeChatId ? generatingChatIds.has(activeChatId) : false;
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
     minHeight: 60,
     maxHeight: 200,
@@ -205,6 +203,8 @@ export function AnimatedAIChat() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    setIsResearching(false);
+    setIsAnalyzingImage(false);
     if (activeChatId) {
       setTypingChatIds(prev => {
         const next = new Set(prev);
@@ -243,6 +243,8 @@ export function AnimatedAIChat() {
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; language: string; title: string } | null>(null);
   const [isResearchMode, setIsResearchMode] = useState(false);
   const [isResearching, setIsResearching] = useState(false);
+  const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
+  const isGenerating = (activeChatId ? generatingChatIds.has(activeChatId) : false) || isResearching || isAnalyzingImage || isPending;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -445,9 +447,8 @@ export function AnimatedAIChat() {
       const isImageRequest = imageKeywords.test(content) || /^(imagine|visualize|depict)\b/i.test(content);
 
       if (activeChatId) {
-        if (isImageRequest) {
-          setGeneratingChatIds(prev => new Set(prev).add(activeChatId));
-        } else {
+        setGeneratingChatIds(prev => new Set(prev).add(activeChatId));
+        if (!isImageRequest && !isResearchMode) {
           setTypingChatIds(prev => new Set(prev).add(activeChatId));
         }
       }
@@ -462,9 +463,8 @@ export function AnimatedAIChat() {
           if (!chatId) {
             chatId = await createNewChat(content);
             if (chatId) {
-              if (isImageRequest) {
-                setGeneratingChatIds(prev => new Set(prev).add(chatId!));
-              } else {
+              setGeneratingChatIds(prev => new Set(prev).add(chatId!));
+              if (!isImageRequest && !isResearchMode) {
                 setTypingChatIds(prev => new Set(prev).add(chatId!));
               }
             }
@@ -812,9 +812,12 @@ export function AnimatedAIChat() {
     setIsAnalyzingImage(true);
 
     try {
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       const res = await fetch("/api/rag/analyze-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           image_base64: imageBase64,
           question: question || "Describe this image in detail.",
@@ -1506,7 +1509,7 @@ export function AnimatedAIChat() {
                       </div>
                     </motion.div>
                   ))}
-                  {isTyping && (
+                  {isTyping && !isResearching && !isAnalyzingImage && (
                     <motion.div
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -1942,11 +1945,11 @@ export function AnimatedAIChat() {
                 handleSendMessage();
               }
             }}
-            disabled={(!isGenerating && !value.trim() && !attachedImage) || isUploading || isAnalyzingImage}
+            disabled={(!isGenerating && !value.trim() && !attachedImage) || isUploading}
             className={cn(
               "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
               "flex items-center gap-2",
-              (value.trim() || isTyping || attachedImage) && !isUploading && !isAnalyzingImage
+              (value.trim() || isGenerating || attachedImage) && !isUploading
                 ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                 : "bg-white/5 text-white/20",
             )}
