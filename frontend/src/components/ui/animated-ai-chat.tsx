@@ -630,7 +630,7 @@ export function AnimatedAIChat() {
             const response = await fetch("/api/chat", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
+              signal: controller?.signal,
               body: JSON.stringify({
                 messages: currentMessages,
                 provider,
