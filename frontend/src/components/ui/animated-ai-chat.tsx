@@ -194,7 +194,7 @@ export function AnimatedAIChat() {
   const [isDragging, setIsDragging] = useState(false);
   const commandPaletteRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const activeChatIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -202,23 +202,16 @@ export function AnimatedAIChat() {
   }, [activeChatId]);
 
   const stopGeneration = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsResearching(false);
-    setIsAnalyzingImage(false);
     if (activeChatId) {
-      setTypingChatIds(prev => {
-        const next = new Set(prev);
-        next.delete(activeChatId);
-        return next;
-      });
-      setGeneratingChatIds(prev => {
-        const next = new Set(prev);
-        next.delete(activeChatId);
-        return next;
-      });
+      const controller = abortControllersRef.current.get(activeChatId);
+      if (controller) {
+        controller.abort();
+        abortControllersRef.current.delete(activeChatId);
+      }
+      setResearchingChatIds(prev => { const n = new Set(prev); n.delete(activeChatId); return n; });
+      setAnalyzingImageChatIds(prev => { const n = new Set(prev); n.delete(activeChatId); return n; });
+      setTypingChatIds(prev => { const n = new Set(prev); n.delete(activeChatId); return n; });
+      setGeneratingChatIds(prev => { const n = new Set(prev); n.delete(activeChatId); return n; });
     }
   };
 
@@ -233,7 +226,6 @@ export function AnimatedAIChat() {
 
   // ── Vision / LLaVA state ─────────────────────────────────────────────────
   const [attachedImage, setAttachedImage] = useState<{ base64: string; name: string } | null>(null);
-  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
@@ -245,9 +237,13 @@ export function AnimatedAIChat() {
   const [isModelInstalled, setIsModelInstalled] = useState(false);
   const [fullscreenCode, setFullscreenCode] = useState<{ code: string; language: string; title: string } | null>(null);
   const [isResearchMode, setIsResearchMode] = useState(false);
-  const [isResearching, setIsResearching] = useState(false);
+  const [researchingChatIds, setResearchingChatIds] = useState<Set<string>>(new Set());
+  const [analyzingImageChatIds, setAnalyzingImageChatIds] = useState<Set<string>>(new Set());
+  
   const isTyping = activeChatId ? typingChatIds.has(activeChatId) : false;
-  const isGenerating = (activeChatId ? generatingChatIds.has(activeChatId) : false) || isResearching || isAnalyzingImage || isPending;
+  const isResearching = activeChatId ? researchingChatIds.has(activeChatId) : false;
+  const isAnalyzingImage = activeChatId ? analyzingImageChatIds.has(activeChatId) : false;
+  const isGenerating = activeChatId ? generatingChatIds.has(activeChatId) : false;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -480,9 +476,8 @@ export function AnimatedAIChat() {
       }
 
       startTransition(async () => {
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
         let chatId = activeChatId;
+        let controller: AbortController | undefined;
 
         try {
           // Create new chat if this is the first message
@@ -494,6 +489,11 @@ export function AnimatedAIChat() {
                 setTypingChatIds(prev => new Set(prev).add(chatId!));
               }
             }
+          }
+
+          if (chatId) {
+            controller = new AbortController();
+            abortControllersRef.current.set(chatId, controller);
           }
 
           // Save user message to Firestore
@@ -562,7 +562,7 @@ export function AnimatedAIChat() {
 
           if (isResearchMode) {
             // ── Research Agent mode ───────────────────────────
-            setIsResearching(true);
+            if (chatId) setResearchingChatIds(prev => new Set(prev).add(chatId!));
             const provider = localStorage.getItem("afs-provider") || "ollama";
             const rawModel = localStorage.getItem("afs-model");
             const model = (rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)" ? "gemma2:2b" : rawModel) || "gemma2:2b";
@@ -572,11 +572,11 @@ export function AnimatedAIChat() {
             const resRes = await fetch("/api/research", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
+              signal: controller?.signal,
               body: JSON.stringify({ query: content, provider, model, apiKey }),
             });
             const resData = await resRes.json();
-            setIsResearching(false);
+            if (chatId) setResearchingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
             if (resData.error) {
               responseContent = `❌ Research Error: ${resData.error}`;
             } else {
@@ -587,7 +587,7 @@ export function AnimatedAIChat() {
             const ragRes = await fetch("/api/rag/query", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
+              signal: controller?.signal,
               body: JSON.stringify({
                 session_id: ragSessionId,
                 question: content,
@@ -658,7 +658,7 @@ export function AnimatedAIChat() {
             });
             // Also stop generating for background chats if not animating (optional)
           }
-          abortControllerRef.current = null;
+          if (chatId) abortControllersRef.current.delete(chatId);
           if (chatId) await sendMessageToFirestore(chatId, aiMessage);
           
           // Clear one-shot intents after message is sent
@@ -685,8 +685,14 @@ export function AnimatedAIChat() {
                 if (chatId) next.delete(chatId);
                 return next;
               });
+              setResearchingChatIds(prev => {
+                const next = new Set(prev);
+                if (chatId) next.delete(chatId);
+                return next;
+              });
             }
             if (chatId) await sendMessageToFirestore(chatId, abortMsg);
+            if (chatId) abortControllersRef.current.delete(chatId);
             return;
           }
           console.error("Chat error:", error);
@@ -708,6 +714,12 @@ export function AnimatedAIChat() {
               if (chatId) next.delete(chatId);
               return next;
             });
+            setResearchingChatIds(prev => {
+              const next = new Set(prev);
+              if (chatId) next.delete(chatId);
+              return next;
+            });
+            abortControllersRef.current.delete(chatId);
           }
         }
       });
@@ -829,6 +841,15 @@ export function AnimatedAIChat() {
   };
 
   const sendImageForAnalysis = async (question: string, imageBase64: string, imageName: string) => {
+    let chatId = activeChatId;
+    if (!chatId) {
+      chatId = await createNewChat(question || "Image Analysis");
+      if (chatId) setGeneratingChatIds(prev => new Set(prev).add(chatId!));
+    }
+    if (!chatId) return;
+
+    setAnalyzingImageChatIds(prev => new Set(prev).add(chatId!));
+
     const userMessage: Message = {
       role: "user",
       content: `__IMAGE_UPLOAD__:${imageBase64}\n${question || "Describe this image in detail."}`,
@@ -840,11 +861,10 @@ export function AnimatedAIChat() {
     setValue("");
     adjustHeight(true);
     setIsChatMode(true);
-    setIsAnalyzingImage(true);
 
     try {
       const controller = new AbortController();
-      abortControllerRef.current = controller;
+      abortControllersRef.current.set(chatId, controller);
       const res = await fetch("/api/rag/analyze-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -863,11 +883,6 @@ export function AnimatedAIChat() {
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
-      let chatId = activeChatId;
-      if (!chatId) {
-        chatId = await createNewChat(question || "Image Analysis");
-      }
-
       await sendMessageToFirestore(chatId, userMessage);
       await sendMessageToFirestore(chatId, assistantMessage);
     } catch (err) {
@@ -877,7 +892,11 @@ export function AnimatedAIChat() {
         { role: "assistant", content: "Sorry, image analysis failed.", timestamp: new Date() },
       ]);
     } finally {
-      setIsAnalyzingImage(false);
+      if (chatId) {
+        setAnalyzingImageChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
+        setGeneratingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
+        abortControllersRef.current.delete(chatId);
+      }
     }
   };
 
