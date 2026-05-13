@@ -35,6 +35,7 @@ import {
 import { db } from "@/lib/firebase";
 import { SettingsDialog } from "./settings-dialog";
 import { ConfirmModal } from "./confirm-modal";
+import { SearchModal } from "./search-modal";
 
 interface ChatHistoryItem {
     id: string;
@@ -62,6 +63,7 @@ export function ChatSidebar() {
     const [editValue, setEditValue] = useState("");
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [chatToDelete, setChatToDelete] = useState<string | null>(null);
+    const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
     useEffect(() => {
         if (!user) {
@@ -204,6 +206,14 @@ export function ChatSidebar() {
                             </div>
                             <span>New chat</span>
                         </motion.button>
+
+                        <button
+                            onClick={() => setIsSearchModalOpen(true)}
+                            className="flex items-center gap-3 px-3 py-2 mt-1 rounded-lg text-white/60 text-sm font-medium transition-colors w-full border border-transparent hover:bg-white/[0.03] hover:text-white/80"
+                        >
+                            <Search className="w-4 h-4 text-white/40" />
+                            <span>Search chats...</span>
+                        </button>
                     </div>
 
                     {/* History */}
@@ -381,6 +391,14 @@ export function ChatSidebar() {
                 description="Are you sure you want to delete this chat? This action cannot be undone."
                 confirmText="Delete Chat"
                 isDestructive={true}
+            />
+
+            <SearchModal
+                isOpen={isSearchModalOpen}
+                onClose={() => setIsSearchModalOpen(false)}
+                chatHistory={chatHistory}
+                user={user}
+                onSelectChat={(chatId) => setActiveChatId(chatId)}
             />
         </>
     );
