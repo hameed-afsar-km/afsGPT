@@ -164,6 +164,9 @@ export function AnimatedAIChat() {
   const [isRecording, setIsRecording] = useState(false);
   const [isCallOpen, setIsCallOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [activeIntent, setActiveIntent] = useState<string | null>(null);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState<number>(-1);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [recentCommand, setRecentCommand] = useState<string | null>(null);
@@ -247,6 +250,28 @@ export function AnimatedAIChat() {
   const isGenerating = (activeChatId ? generatingChatIds.has(activeChatId) : false) || isResearching || isAnalyzingImage || isPending;
 
   useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!(target instanceof HTMLElement)) return;
+      
+      // Close Attach Menu if clicking outside
+      if (showAttachMenu && !target.closest('.attach-menu-container')) {
+        setShowAttachMenu(false);
+      }
+      // Close Actions Menu if clicking outside
+      if (showActionsMenu && !target.closest('.actions-menu-container')) {
+        setShowActionsMenu(false);
+      }
+      // Close Command Palette if clicking outside
+      if (showCommandPalette && !target.closest('.command-palette-container')) {
+        setShowCommandPalette(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showAttachMenu, showActionsMenu, showCommandPalette]);
+
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
@@ -275,6 +300,12 @@ export function AnimatedAIChat() {
       label: "Research",
       description: "Toggle Deep Web Research Mode",
       prefix: "/research",
+    },
+    {
+      icon: <ImageIcon className="w-4 h-4" />,
+      label: "Generate Image",
+      description: "Create images with AI",
+      prefix: "/image",
     },
   ];
 
@@ -342,19 +373,7 @@ export function AnimatedAIChat() {
       } else if (e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
         if (activeSuggestion >= 0) {
-          const selectedCommand = commandSuggestions[activeSuggestion];
-          if (selectedCommand.prefix === "/research") {
-            setIsResearchMode((prev) => !prev);
-            setValue("");
-            setShowCommandPalette(false);
-            setRecentCommand("Research Mode " + (!isResearchMode ? "ON" : "OFF"));
-            setTimeout(() => setRecentCommand(null), 3000);
-          } else {
-            setValue(selectedCommand.prefix + " ");
-            setShowCommandPalette(false);
-            setRecentCommand(selectedCommand.label);
-            setTimeout(() => setRecentCommand(null), 3500);
-          }
+          selectCommandSuggestion(activeSuggestion);
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -402,7 +421,7 @@ export function AnimatedAIChat() {
         const rawModel = localStorage.getItem("afs-model");
         const model = rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)" ? "qwen2.5-coder:1.5b" : rawModel;
         const codeKeywords = ["code", "function", "script", "python", "javascript", "react", "html", "css", "bug", "debug", "api"];
-        const isCodeRelated = codeKeywords.some(keyword => content.toLowerCase().includes(keyword));
+        const isCodeRelated = activeIntent === "code" || codeKeywords.some(keyword => content.toLowerCase().includes(keyword));
         
         if (provider === "ollama" && model !== "qwen2.5-coder:1.5b" && isCodeRelated) {
           setPendingMessage({ text: content, limit: historyLimit });
@@ -451,7 +470,7 @@ export function AnimatedAIChat() {
       setIsRecording(false);
 
       const imageKeywords = /\b(generate|create|draw|make|produce|render|paint|design|illustrate|show me)\b.{0,40}\b(image|picture|photo|illustration|art|artwork|painting|drawing|portrait|landscape|wallpaper)\b/i;
-      const isImageRequest = imageKeywords.test(content) || /^(imagine|visualize|depict)\b/i.test(content);
+      const isImageRequest = activeIntent === "image" || imageKeywords.test(content) || /^(imagine|visualize|depict)\b/i.test(content);
 
       if (activeChatId) {
         setGeneratingChatIds(prev => new Set(prev).add(activeChatId));
@@ -641,6 +660,11 @@ export function AnimatedAIChat() {
           }
           abortControllerRef.current = null;
           if (chatId) await sendMessageToFirestore(chatId, aiMessage);
+          
+          // Clear one-shot intents after message is sent
+          if (activeIntent && activeIntent !== "research") {
+            setActiveIntent(null);
+          }
         } catch (error: any) {
           if (error.name === "AbortError") {
             const abortMsg: any = {
@@ -896,18 +920,29 @@ export function AnimatedAIChat() {
 
   const selectCommandSuggestion = (index: number) => {
     const selectedCommand = commandSuggestions[index];
-    if (selectedCommand.prefix === "/research") {
-      setIsResearchMode((prev) => !prev);
-      setValue("");
-      setShowCommandPalette(false);
-      setRecentCommand("Research Mode " + (!isResearchMode ? "ON" : "OFF"));
-      setTimeout(() => setRecentCommand(null), 2000);
+    const prefix = selectedCommand.prefix;
+
+    if (prefix === "/research") {
+      const newState = !isResearchMode;
+      setIsResearchMode(newState);
+      setActiveIntent(newState ? "research" : null);
+      setRecentCommand("Research Mode " + (newState ? "ON" : "OFF"));
+    } else if (prefix === "/code") {
+      setActiveIntent(activeIntent === "code" ? null : "code");
+      setRecentCommand("Coding Intent " + (activeIntent !== "code" ? "Active" : "Cleared"));
+    } else if (prefix === "/brainstorm") {
+      setActiveIntent(activeIntent === "brainstorm" ? null : "brainstorm");
+      setRecentCommand("Brainstorming Intent " + (activeIntent !== "brainstorm" ? "Active" : "Cleared"));
+    } else if (prefix === "/image") {
+      setActiveIntent(activeIntent === "image" ? null : "image");
+      setRecentCommand("Image Generation Intent " + (activeIntent !== "image" ? "Active" : "Cleared"));
     } else {
-      setValue(selectedCommand.prefix + " ");
-      setShowCommandPalette(false);
-      setRecentCommand(selectedCommand.label);
-      setTimeout(() => setRecentCommand(null), 2000);
+      setValue(prefix + " ");
     }
+
+    setShowCommandPalette(false);
+    setShowActionsMenu(false);
+    setTimeout(() => setRecentCommand(null), 2000);
   };
 
   const toggleRecording = () => {
@@ -1620,7 +1655,7 @@ export function AnimatedAIChat() {
           {showCommandPalette && (
             <motion.div
               ref={commandPaletteRef}
-              className="fixed left-1/2 -translate-x-1/2 bottom-[140px] w-full max-w-lg backdrop-blur-xl bg-[#0A0A0B]/90 rounded-3xl z-50 border border-white/10 overflow-hidden p-3"
+              className="fixed left-1/2 -translate-x-1/2 bottom-[140px] w-full max-w-lg backdrop-blur-xl bg-[#0A0A0B]/90 rounded-3xl z-50 border border-white/10 overflow-hidden p-3 command-palette-container"
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
@@ -1845,14 +1880,37 @@ export function AnimatedAIChat() {
               </motion.div>
             )}
           </AnimatePresence>
-          {isResearchMode && (
+          {activeIntent && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8, x: 20 }}
               animate={{ opacity: 1, scale: 1, x: 0 }}
-              className="absolute top-4 right-6 z-20 flex items-center gap-1.5 px-3 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded-full shadow-[0_0_15px_rgba(34,211,238,0.1)]"
+              className={cn(
+                "absolute top-4 right-6 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full shadow-lg border",
+                activeIntent === "research" ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400" :
+                activeIntent === "code" ? "bg-violet-500/10 border-violet-500/30 text-violet-400" :
+                activeIntent === "image" ? "bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-400" :
+                "bg-amber-500/10 border-amber-500/30 text-amber-400"
+              )}
             >
-              <Globe className="w-3 h-3 text-cyan-400 animate-pulse" />
-              <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em]">Research ON</span>
+              {activeIntent === "research" ? <Globe className="w-3.5 h-3.5 animate-pulse" /> :
+               activeIntent === "code" ? <Code2 className="w-3.5 h-3.5" /> :
+               activeIntent === "image" ? <ImageIcon className="w-3.5 h-3.5" /> :
+               <Lightbulb className="w-3.5 h-3.5" />}
+              <span className="text-[10px] font-black uppercase tracking-[0.2em]">
+                {activeIntent === "research" ? "Research Mode" :
+                 activeIntent === "code" ? "Coding Mode" :
+                 activeIntent === "image" ? "Image Gen" :
+                 "Brainstorming"}
+              </span>
+              <button 
+                onClick={() => {
+                  if (activeIntent === "research") setIsResearchMode(false);
+                  setActiveIntent(null);
+                }}
+                className="hover:text-white transition-colors"
+              >
+                <X className="w-3 h-3 ml-1" />
+              </button>
             </motion.div>
           )}
           <Textarea
@@ -1883,60 +1941,94 @@ export function AnimatedAIChat() {
         </div>
 
         <div className="px-5 pb-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            {/* Grouped Attachments */}
-            <div className="flex items-center gap-0.5 bg-white/5 rounded-xl border border-white/10 p-0.5">
+          <div className="flex items-center gap-3">
+            {/* Attachments Dropdown */}
+            <div className="relative attach-menu-container">
               <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleAttachFile}
-                disabled={isUploading}
-                title="Attach document for RAG analysis"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setShowAttachMenu(!showAttachMenu)}
                 className={cn(
-                  "p-2 rounded-lg transition-colors",
-                  isUploading
-                    ? "text-violet-400 cursor-wait opacity-50"
-                    : fileAttachedToNextMessage.length > 0
-                      ? "text-violet-400 bg-violet-500/10 shadow-[0_0_10px_rgba(139,92,246,0.2)]"
-                      : "text-white/30 hover:text-white/90 hover:bg-white/5",
+                  "p-2.5 rounded-xl transition-all duration-300",
+                  showAttachMenu ? "bg-white/15 text-white" : "text-white/30 hover:text-white/90 hover:bg-white/5"
                 )}
               >
-                <Paperclip className="w-4.5 h-4.5" />
+                <Paperclip className="w-5 h-5" />
               </motion.button>
-              <div className="w-[1px] h-3.5 bg-white/10 mx-0.5" />
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => imageInputRef.current?.click()}
-                title="Upload image for LLaVA analysis"
-                className={cn(
-                  "p-2 rounded-lg transition-colors",
-                  attachedImage
-                    ? "text-fuchsia-400 bg-fuchsia-500/10 shadow-[0_0_10px_rgba(232,121,249,0.2)]"
-                    : "text-white/30 hover:text-fuchsia-400 hover:bg-fuchsia-500/10",
+              
+              <AnimatePresence>
+                {showAttachMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute bottom-full left-0 mb-3 w-48 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden p-1.5 z-50"
+                  >
+                    <button
+                      onClick={() => { handleAttachFile(); setShowAttachMenu(false); }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 rounded-xl text-xs font-medium text-white/70 hover:text-white transition-all"
+                    >
+                      <FileText className="w-4 h-4 text-violet-400" />
+                      <span>Attach Document</span>
+                    </button>
+                    <button
+                      onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 rounded-xl text-xs font-medium text-white/70 hover:text-white transition-all"
+                    >
+                      <ImageIcon className="w-4 h-4 text-fuchsia-400" />
+                      <span>Upload Image</span>
+                    </button>
+                  </motion.div>
                 )}
-              >
-                <ImageIcon className="w-4.5 h-4.5" />
-              </motion.button>
+              </AnimatePresence>
             </div>
 
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowCommandPalette((prev) => !prev);
-              }}
-              title="Quick Actions"
-              className={cn(
-                "p-2.5 rounded-xl transition-colors",
-                showCommandPalette
-                  ? "bg-white/10 text-white"
-                  : "text-white/30 hover:text-white/90 hover:bg-white/5",
-              )}
-            >
-              <Command className="w-5 h-5" />
-            </motion.button>
+            {/* Quick Actions Dropdown */}
+            <div className="relative actions-menu-container">
+              <motion.button
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setShowActionsMenu(!showActionsMenu)}
+                className={cn(
+                  "p-2.5 rounded-xl transition-all duration-300",
+                  showActionsMenu ? "bg-white/15 text-white" : "text-white/30 hover:text-white/90 hover:bg-white/5"
+                )}
+              >
+                <Command className="w-5 h-5" />
+              </motion.button>
+
+              <AnimatePresence>
+                {showActionsMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute bottom-full left-0 mb-3 w-56 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden p-1.5 z-50"
+                  >
+                    {commandSuggestions.map((cmd, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => selectCommandSuggestion(idx)}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all",
+                          activeIntent === cmd.prefix.slice(1) || (cmd.prefix === "/research" && isResearchMode)
+                            ? "bg-white/10 text-white"
+                            : "text-white/50 hover:bg-white/5 hover:text-white"
+                        )}
+                      >
+                        <span className="text-violet-400">{cmd.icon}</span>
+                        <div className="flex flex-col items-start">
+                          <span>{cmd.label}</span>
+                          <span className="text-[9px] opacity-40 font-normal">{cmd.description}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Voice Call */}
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -1946,6 +2038,7 @@ export function AnimatedAIChat() {
             >
               <Mic className="w-5 h-5" />
             </motion.button>
+            
             <div className="h-6 w-[1px] bg-white/10 mx-1" />
             <ProviderSelector />
           </div>
