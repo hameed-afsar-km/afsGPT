@@ -1,78 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
+
 export async function POST(req: NextRequest) {
     try {
-        const { provider, apiKey } = await req.json();
+        const body = await req.json();
+        
+        // Proxy the request to the Render backend
+        const response = await fetch(`${RAG_SERVER}/models`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
 
-        if (provider === "ollama") {
-            try {
-                const response = await fetch("http://localhost:11434/api/tags");
-                if (response.ok) {
-                    const data = await response.json();
-                    return NextResponse.json({ 
-                        models: data.models.map((m: any) => m.name) 
-                    });
-                }
-                return NextResponse.json({ models: [], error: "Ollama not running" });
-            } catch (err) {
-                return NextResponse.json({ models: [], error: "Ollama connection failed" });
-            }
+        if (response.ok) {
+            const data = await response.json();
+            return NextResponse.json(data);
         }
 
-        if (provider === "openai") {
-            const defaultModels = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"];
-            if (!apiKey) return NextResponse.json({ models: defaultModels });
-            try {
-                const response = await fetch("https://api.openai.com/v1/models", {
-                    headers: { "Authorization": `Bearer ${apiKey}` }
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    // Filter for chat models
-                    const models = data.data
-                        .filter((m: any) => m.id.startsWith("gpt-"))
-                        .map((m: any) => m.id)
-                        .sort();
-                    
-                    // Ensure our defaults are included if not already there
-                    const combinedModels = Array.from(new Set([...defaultModels, ...models]));
-                    return NextResponse.json({ models: combinedModels });
-                }
-                // Even if key is invalid, show defaults so UI isn't empty
-                return NextResponse.json({ models: defaultModels, error: "Invalid API Key - showing defaults" });
-            } catch (err) {
-                return NextResponse.json({ models: defaultModels, error: "Failed to fetch OpenAI models - showing defaults" });
-            }
-        }
-
-        if (provider === "gemini") {
-            // Gemini model listing is a bit complex via API, providing common ones
-            return NextResponse.json({ 
-                models: [
-                    "gemini-3-flash",
-                    "gemini-2.5-flash", 
-                    "gemini-2.5-pro", 
-                    "gemini-1.5-flash", 
-                    "gemini-1.5-pro", 
-                    "gemini-1.0-pro"
-                ] 
-            });
-        }
-
-        if (provider === "anthropic") {
-            // Anthropic models
-            return NextResponse.json({ 
-                models: [
-                    "claude-3-5-sonnet-20240620", 
-                    "claude-3-opus-20240229", 
-                    "claude-3-sonnet-20240229", 
-                    "claude-3-haiku-20240307"
-                ] 
-            });
-        }
-
+        // Return empty list instead of failing to avoid UI breakage
         return NextResponse.json({ models: [] });
-    } catch (error) {
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    } catch (error: any) {
+        console.error("Models proxy error:", error);
+        return NextResponse.json({ models: [] });
     }
 }

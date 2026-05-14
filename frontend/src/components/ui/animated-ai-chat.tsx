@@ -895,7 +895,7 @@ export function AnimatedAIChat() {
       const data = await res.json();
       const assistantMessage: Message = {
         role: "assistant",
-        content: data.answer || data.error || "No response from LLaVA.",
+        content: data.answer || data.error || data.detail || "No response from LLaVA.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMessage]);

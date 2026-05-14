@@ -17,6 +17,7 @@ import logging
 import base64
 import ollama
 import google.generativeai as genai
+import requests
 
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
@@ -80,6 +81,16 @@ class ResearchRequest(BaseModel):
     provider: str = "ollama"
     model: str = "gemma2:2b"
     api_key: str = ""
+
+class ChatRequest(BaseModel):
+    messages: list
+    provider: str
+    model: str
+    apiKey: Optional[str] = None
+
+class ModelsRequest(BaseModel):
+    provider: str
+    apiKey: Optional[str] = None
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -251,7 +262,11 @@ def analyze_image(body: ImageAnalyzeRequest):
     except Exception as e:
         error_str = str(e)
         log.error(f"Image analysis error: {error_str}")
-        raise HTTPException(status_code=500, detail=f"Analysis Error: {error_str}")
+        # Return error in a field the frontend expects
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Analysis Error: {error_str}", "detail": error_str}
+        )
 
 
 @app.delete("/clear-all")
@@ -273,6 +288,123 @@ async def clear_all_sessions():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return JSONResponse({"message": "All files cleared."})
+
+
+@app.post("/chat")
+async def chat_handler(body: ChatRequest):
+    """Unified chat endpoint that uses backend keys or user-provided keys."""
+    provider = body.provider.lower()
+    model = body.model
+    # Priority: 1. Request Body Key, 2. Backend Environment Variable
+    api_key = body.apiKey or os.environ.get(f"{provider.upper()}_API_KEY")
+
+    SYSTEM_PROMPT = (
+        "You are Afs AI, a high-end AI assistant. Always format your responses beautifully using Markdown. "
+        "Use bold for emphasis and clean lists. CRITICAL: Whenever you provide content that represents a file "
+        "(like code, a README.md, a text file, or any technical document), you MUST wrap it in a triple-backtick "
+        "markdown code block with the appropriate language label. Always include a comment on the first line with the filename."
+    )
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + body.messages
+
+    try:
+        if provider == "ollama":
+            response = requests.post(
+                "http://localhost:11434/api/chat",
+                json={"model": model, "messages": messages, "stream": False},
+                timeout=60
+            )
+            if response.ok:
+                return JSONResponse({"content": response.json()["message"]["content"]})
+            raise HTTPException(status_code=response.status_code, detail="Ollama chat failed")
+
+        if provider == "openai":
+            if not api_key: raise HTTPException(status_code=400, detail="OpenAI API Key missing")
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"model": model, "messages": messages},
+                timeout=60
+            )
+            if response.ok:
+                return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenAI failed"))
+
+        if provider == "gemini":
+            if not api_key: raise HTTPException(status_code=400, detail="Gemini API Key missing")
+            # Using direct REST API for chat
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [
+                    {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                    for m in messages if m["role"] != "system"
+                ],
+                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]}
+            }
+            response = requests.post(url, json=payload, timeout=60)
+            if response.ok:
+                return JSONResponse({"content": response.json()["candidates"][0]["content"]["parts"][0]["text"]})
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Gemini failed"))
+
+        if provider == "anthropic":
+            if not api_key: raise HTTPException(status_code=400, detail="Anthropic API Key missing")
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 1024,
+                    "system": SYSTEM_PROMPT,
+                    "messages": [m for m in messages if m["role"] != "system"]
+                },
+                timeout=60
+            )
+            if response.ok:
+                return JSONResponse({"content": response.json()["content"][0]["text"]})
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Anthropic failed"))
+
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+
+    except Exception as e:
+        log.error(f"Chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/models")
+async def get_provider_models(body: ModelsRequest):
+    """Fetch available models for a provider, using backend keys if needed."""
+    provider = body.provider.lower()
+    api_key = body.apiKey or os.environ.get(f"{provider.upper()}_API_KEY")
+
+    if provider == "ollama":
+        try:
+            res = requests.get("http://localhost:11434/api/tags", timeout=5)
+            if res.ok:
+                return JSONResponse({"models": [m["name"] for m in res.json().get("models", [])]})
+        except: pass
+        return JSONResponse({"models": ["gemma2:2b", "llama3", "moondream"]})
+
+    if provider == "openai":
+        if not api_key: return JSONResponse({"models": ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]})
+        res = requests.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+        if res.ok:
+            return JSONResponse({"models": [m["id"] for m in res.json()["data"] if "gpt" in m["id"]]})
+
+    if provider == "gemini":
+        if not api_key: return JSONResponse({"models": ["gemini-1.5-flash", "gemini-1.5-pro"]})
+        res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}")
+        if res.ok:
+            return JSONResponse({"models": [m["name"].split("/")[-1] for m in res.json()["models"] if "generateContent" in m["supportedGenerationMethods"]]})
+
+    if provider == "anthropic":
+        return JSONResponse({"models": ["claude-3-5-sonnet-20240620", "claude-3-haiku-20240307", "claude-3-opus-20240229"]})
+
+    return JSONResponse({"models": []})
+
 
 
 # ─── Static frontend ──────────────────────────────────────────────────────────
