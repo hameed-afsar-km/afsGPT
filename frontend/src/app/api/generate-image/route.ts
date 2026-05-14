@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const HF_API_URL =
-  "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell";
+const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,53 +9,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    const hfToken = process.env.HF_TOKEN;
-    if (!hfToken) {
-      return NextResponse.json(
-        { error: "HF_TOKEN is not configured on the server." },
-        { status: 500 }
-      );
-    }
-
-    const cleanToken = hfToken.trim().replace(/^["']|["']$/g, "");
-
-    const response = await fetch(HF_API_URL, {
+    // Proxy the request to the Render backend
+    const response = await fetch(`${RAG_SERVER}/generate-image`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${cleanToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          guidance_scale: 0.0,
-          num_inference_steps: 4,
-          max_sequence_length: 256,
-        },
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`HF API Error (${response.status}):`, errorText);
+      const errorData = await response.json().catch(() => ({ detail: "Generation failed" }));
       return NextResponse.json(
-        { error: `Image generation failed: ${errorText}` },
+        { error: errorData.detail || "Image generation failed" },
         { status: response.status }
       );
     }
 
-    // HF returns raw image bytes — convert to base64 data URL
-    const imageBuffer = await response.arrayBuffer();
-    const base64 = Buffer.from(imageBuffer).toString("base64");
-    const dataUrl = `data:image/jpeg;base64,${base64}`;
+    const data = await response.json();
+    
+    // The backend returns a success object with a URL
+    // If the backend returns a full URL, use it, otherwise prepend backend URL
+    const imageUrl = data.url.startsWith('http') ? data.url : `${RAG_SERVER}${data.url}`;
 
-    return NextResponse.json({
-      success: true,
-      dataUrl,
-      prompt,
-    });
+    // Convert the image to a dataUrl for the frontend typewriter effect (optional but recommended)
+    try {
+        const imgFetch = await fetch(imageUrl);
+        const buffer = await imgFetch.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString('base64');
+        return NextResponse.json({
+            success: true,
+            dataUrl: `data:image/jpeg;base64,${base64}`,
+            prompt: data.enhanced_prompt || prompt
+        });
+    } catch (e) {
+        // Fallback to direct URL if base64 conversion fails
+        return NextResponse.json({
+            success: true,
+            dataUrl: imageUrl,
+            prompt: data.enhanced_prompt || prompt
+        });
+    }
+
   } catch (error: any) {
-    console.error("Image generation error:", error);
+    console.error("Image generation proxy error:", error);
     return NextResponse.json(
       { error: `Server error: ${error.message}` },
       { status: 500 }

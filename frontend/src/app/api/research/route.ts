@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Query cannot be empty." }, { status: 400 });
     }
 
-    const res = await fetch(`${RAG_SERVER}/api/research`, {
+    const res = await fetch(`${RAG_SERVER}/research`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

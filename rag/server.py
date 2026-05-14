@@ -152,7 +152,7 @@ def ask_question(body: QueryRequest):
     return JSONResponse({"answer": answer})
 
 
-@app.post("/api/generate-image")
+@app.post("/generate-image")
 async def create_image(body: ImageGenRequest):
     """Generates an image via FLUX.1 using Qwen-enhanced prompt."""
     if not body.prompt.strip():
@@ -177,7 +177,7 @@ async def clear_session(body: ClearRequest):
     return JSONResponse({"message": "Session cleared."})
 
 
-@app.post("/api/research")
+@app.post("/research")
 async def research_query(body: ResearchRequest):
     """
     Run the multi-step Research Agent:
