@@ -25,7 +25,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional, Dict
+import uvicorn
 
 # Allow sibling imports (vector, rag_chain live in same dir)
 sys.path.insert(0, os.path.dirname(__file__))
@@ -91,6 +92,18 @@ class ChatRequest(BaseModel):
 class ModelsRequest(BaseModel):
     provider: str
     apiKey: Optional[str] = None
+
+@app.get("/health")
+def health_check():
+    """Returns the status and available routes of the backend."""
+    return {
+        "status": "online",
+        "version": "1.1.0",
+        "routes": [
+            "/chat", "/models", "/research", "/analyze-image", 
+            "/generate-image", "/upload", "/query", "/clear"
+        ]
+    }
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
