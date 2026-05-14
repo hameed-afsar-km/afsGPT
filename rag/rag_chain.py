@@ -2,7 +2,9 @@
 rag_chain.py — Build and run the RAG pipeline using OllamaLLM + ChromaDB retriever.
 """
 
+import os
 from langchain_ollama.llms import OllamaLLM
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -12,7 +14,12 @@ from vector import get_retriever
 
 LLM_MODEL = "gemma2:2b"    # swap to any model pulled via `ollama pull`
 
-llm = OllamaLLM(model=LLM_MODEL)
+# Use Google Gemini if API key is present (Cloud/Render), otherwise fallback to Ollama (Local)
+if os.environ.get("GOOGLE_API_KEY"):
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+else:
+    llm = OllamaLLM(model=LLM_MODEL)
+
 
 # ─── Prompt ───────────────────────────────────────────────────────────────────
 

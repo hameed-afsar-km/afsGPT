@@ -16,6 +16,8 @@ import shutil
 import logging
 import base64
 import ollama
+import google.generativeai as genai
+
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
@@ -197,11 +199,31 @@ def analyze_image(body: ImageAnalyzeRequest):
     try:
         log.info(f"Received image analysis request. Question: {body.question[:50]}...")
         
-        # Pass the raw base64 string directly to Ollama
-        # Ollama supports direct base64 strings in the images array
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
 
+        # ─── Google Gemini (Cloud / Render) ─────────────────────────
+        google_api_key = os.environ.get("GOOGLE_API_KEY")
+        if google_api_key:
+            log.info("Using Google Gemini for image analysis...")
+            genai.configure(api_key=google_api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # Convert base64 to bytes
+            img_data = base64.b64decode(clean_base64)
+            
+            response = model.generate_content([
+                body.question,
+                {'mime_type': 'image/jpeg', 'data': img_data}
+            ])
+            
+            if response.text:
+                log.info("Gemini analysis completed successfully.")
+                return JSONResponse({"answer": response.text})
+            else:
+                raise HTTPException(status_code=500, detail="Gemini returned an empty response.")
+
+        # ─── Ollama (Local Fallback) ──────────────────────────────
         log.info(f"Calling Ollama with model moondream... (Image size: {len(clean_base64)} chars)")
         
         response = ollama.chat(
@@ -220,7 +242,7 @@ def analyze_image(body: ImageAnalyzeRequest):
 
         if "message" in response and "content" in response["message"]:
             answer = response["message"]["content"]
-            log.info("LLaVA analysis completed successfully.")
+            log.info("Ollama analysis completed successfully.")
             return JSONResponse({"answer": answer})
         else:
             log.error(f"Unexpected response from Ollama: {response}")
@@ -228,10 +250,8 @@ def analyze_image(body: ImageAnalyzeRequest):
 
     except Exception as e:
         error_str = str(e)
-        log.error(f"LLaVA analysis error: {error_str}")
-        if "png: invalid format" in error_str:
-            raise HTTPException(status_code=400, detail="The image format is invalid or too small for the model to process.")
-        raise HTTPException(status_code=500, detail=f"Ollama Error: {error_str}")
+        log.error(f"Image analysis error: {error_str}")
+        raise HTTPException(status_code=500, detail=f"Analysis Error: {error_str}")
 
 
 @app.delete("/clear-all")

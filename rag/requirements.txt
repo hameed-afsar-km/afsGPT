@@ -16,3 +16,4 @@ langgraph
 duckduckgo-search>=6.0.0
 ollama
 ddgs
+google-generativeai

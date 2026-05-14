@@ -8,15 +8,34 @@ log = logging.getLogger(__name__)
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
-def enhance_prompt_with_ollama(user_prompt: str) -> str:
-    """Uses Qwen2.5-Coder to rewrite the user prompt for FLUX."""
+def enhance_prompt(user_prompt: str) -> str:
+    """Uses Google Gemini or Ollama to rewrite the user prompt for FLUX."""
     system_prompt = (
         "You are an expert text-to-image prompt engineer. Your task is to take "
         "the user's request and create a highly detailed, descriptive prompt "
         "optimized for FLUX.1. Output ONLY the raw prompt text, no explanations, "
         "no conversational filler, no markdown formatting."
     )
+    
+    # ─── Google Gemini Fallback (Cloud) ─────────────────────────────
+    google_api_key = os.environ.get("GOOGLE_API_KEY")
+    if google_api_key:
+        try:
+            import google.generativeai as genai
+            log.info("Enhancing prompt with Google Gemini...")
+            genai.configure(api_key=google_api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content([system_prompt, user_prompt])
+            if response.text:
+                enhanced = response.text.strip()
+                log.info(f"Gemini enhanced prompt: {enhanced}")
+                return enhanced
+        except Exception as e:
+            log.error(f"Gemini prompt enhancement failed: {e}")
+
+    # ─── Ollama (Local) ─────────────────────────────────────────────
     try:
+
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
@@ -39,8 +58,9 @@ def generate_image(prompt: str, save_dir: str) -> dict:
     """Generates an image using FLUX.1-dev and saves it."""
     if not HF_TOKEN:
         return {"error": "HF_TOKEN environment variable not set. Please set it to use image generation."}
+    
+    enhanced_prompt = enhance_prompt(prompt)
 
-    enhanced_prompt = enhance_prompt_with_ollama(prompt)
 
     # Clean token in case it has literal quotes from environment
     clean_token = HF_TOKEN.strip().strip('"').strip("'")

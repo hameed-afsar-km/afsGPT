@@ -17,6 +17,7 @@ except ImportError:
 import pandas as pd
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -26,7 +27,12 @@ EMBED_MODEL = "nomic-embed-text"          # pull with: ollama pull nomic-embed-t
 CHUNK_SIZE  = 1000
 CHUNK_OVERLAP = 150
 
-embeddings = OllamaEmbeddings(model=EMBED_MODEL)
+# Use Google Gemini Embeddings if API key is present (Cloud/Render), otherwise fallback to Ollama (Local)
+if os.environ.get("GOOGLE_API_KEY"):
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+else:
+    embeddings = OllamaEmbeddings(model=EMBED_MODEL)
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
