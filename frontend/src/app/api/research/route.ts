@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const RAG_BASE = process.env.RAG_API_URL || "http://localhost:8001";
+const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Query cannot be empty." }, { status: 400 });
     }
 
-    const res = await fetch(`${RAG_BASE}/api/research`, {
+    const res = await fetch(`${RAG_SERVER}/api/research`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
