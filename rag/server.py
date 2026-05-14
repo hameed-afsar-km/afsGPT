@@ -309,14 +309,27 @@ async def chat_handler(body: ChatRequest):
 
     try:
         if provider == "ollama":
-            response = requests.post(
-                "http://localhost:11434/api/chat",
-                json={"model": model, "messages": messages, "stream": False},
-                timeout=60
-            )
-            if response.ok:
-                return JSONResponse({"content": response.json()["message"]["content"]})
-            raise HTTPException(status_code=response.status_code, detail="Ollama chat failed")
+            # Check if Ollama is actually available
+            try:
+                # Short timeout to avoid hanging the request
+                requests.get("http://localhost:11434/api/tags", timeout=1)
+                
+                response = requests.post(
+                    "http://localhost:11434/api/chat",
+                    json={"model": model, "messages": messages, "stream": False},
+                    timeout=60
+                )
+                if response.ok:
+                    return JSONResponse({"content": response.json()["message"]["content"]})
+            except:
+                # If Ollama is not available (Cloud mode), fallback to Gemini if possible
+                if os.environ.get("GOOGLE_API_KEY"):
+                    log.info("Ollama unavailable, falling back to Gemini for chat.")
+                    provider = "gemini"
+                    model = "gemini-1.5-flash"
+                    api_key = os.environ.get("GOOGLE_API_KEY")
+                else:
+                    raise HTTPException(status_code=503, detail="Ollama is not running and no cloud fallback (GOOGLE_API_KEY) is configured.")
 
         if provider == "openai":
             if not api_key: raise HTTPException(status_code=400, detail="OpenAI API Key missing")

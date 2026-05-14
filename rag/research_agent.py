@@ -37,27 +37,41 @@ search_tool = DuckDuckGoSearchRun()
 # ─── LLM Factory ──────────────────────────────────────────────────────────────
 
 def get_llm(provider: str, model: str, api_key: str):
-    """Return an LLM instance based on provider."""
-    if provider == "ollama":
-        return ChatOllama(model=model or "gemma2:2b", temperature=0.3)
+    """Return an LLM instance based on provider, with cloud fallback."""
+    google_key = api_key or os.environ.get("GOOGLE_API_KEY")
     
-    if provider == "gemini":
+    # Auto-switch to Gemini if on cloud (Render) and Ollama isn't requested specifically with local intent
+    if provider == "ollama":
+        # Check if ollama is actually running
+        import requests
+        try:
+            requests.get("http://localhost:11434/api/tags", timeout=1)
+            return ChatOllama(model=model or "gemma2:2b", temperature=0.3)
+        except:
+            # Fallback to Gemini if ollama is down (common on Render/Cloud)
+            if google_key:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_key, temperature=0.3)
+    
+    if provider == "gemini" or (provider == "ollama" and google_key):
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(
-            model=model or "gemini-1.5-flash",
-            google_api_key=api_key,
+            model=model if provider == "gemini" and model else "gemini-1.5-flash",
+            google_api_key=google_key,
             temperature=0.3
         )
     
     if provider == "openai":
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=model or "gpt-4o-mini", api_key=api_key, temperature=0.3)
+        key = api_key or os.environ.get("OPENAI_API_KEY")
+        return ChatOpenAI(model=model or "gpt-4o-mini", api_key=key, temperature=0.3)
     
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(model=model or "claude-3-haiku-20240307", api_key=api_key, temperature=0.3)
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        return ChatAnthropic(model=model or "claude-3-haiku-20240307", api_key=key, temperature=0.3)
     
-    # Fallback: Ollama
+    # Final Fallback: Ollama (Local)
     return ChatOllama(model="gemma2:2b", temperature=0.3)
 
 # ─── Nodes ────────────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ python-multipart
 pypdf
 pandas
 openpyxl
-pysqlite3-binary
+pysqlite3-binary; sys_platform == 'linux'
 langgraph
 duckduckgo-search>=6.0.0
 ollama
