@@ -17,11 +17,14 @@ import logging
 import base64
 import ollama
 import google.generativeai as genai
+import re
 import requests
+import edge_tts
+import io
 
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -233,22 +236,27 @@ def analyze_image(body: ImageAnalyzeRequest):
         
         if google_api_key:
             log.info("Using Google Gemini for image analysis...")
-            genai.configure(api_key=google_api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # Convert base64 to bytes
-            img_data = base64.b64decode(clean_base64)
-            
-            response = model.generate_content([
-                body.question,
-                {'mime_type': 'image/jpeg', 'data': img_data}
-            ])
-            
-            if response.text:
-                log.info("Gemini analysis completed successfully.")
-                return JSONResponse({"answer": response.text})
-            else:
-                raise HTTPException(status_code=500, detail="Gemini returned an empty response.")
+            try:
+                genai.configure(api_key=google_api_key)
+                # Using 'gemini-1.5-flash' which is the standard multimodal model
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                # Convert base64 to bytes
+                img_data = base64.b64decode(clean_base64)
+                
+                response = model.generate_content([
+                    body.question,
+                    {'mime_type': 'image/jpeg', 'data': img_data}
+                ])
+                
+                if response.text:
+                    log.info("Gemini analysis completed successfully.")
+                    return JSONResponse({"answer": response.text})
+                else:
+                    raise Exception("Gemini returned an empty response.")
+            except Exception as gemini_err:
+                log.error(f"Gemini analysis failed: {gemini_err}")
+                # Fall through to Ollama if Gemini fails
 
         # ─── Ollama (Local Fallback) ──────────────────────────────
         log.info(f"Calling Ollama with model moondream... (Image size: {len(clean_base64)} chars)")
@@ -348,13 +356,6 @@ async def chat_handler(body: ChatRequest):
                     raise HTTPException(status_code=503, detail="Ollama is not running and no cloud fallback (GOOGLE_API_KEY) is configured.")
 
         if provider == "openai":
-            if not api_key: raise HTTPException(status_code=400, detail="OpenAI API Key missing")
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={"model": model, "messages": messages},
-                timeout=60
-            )
             if response.ok:
                 return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
             raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenAI failed"))
@@ -377,26 +378,36 @@ async def chat_handler(body: ChatRequest):
 
         if provider == "anthropic":
             if not api_key: raise HTTPException(status_code=400, detail="Anthropic API Key missing")
+            try:
+                if not api_key: raise Exception("Gemini API Key missing")
+                genai.configure(api_key=api_key)
+                # Ensure correct model name format
+                clean_model = model if "models/" in model else f"models/{model}"
+                gemini_model = genai.GenerativeModel(model_name=model)
+                response = gemini_model.generate_content(
+                    [m["content"] for m in messages],
+                    generation_config={"temperature": 0.3}
+                )
+                if response.text:
+                    return JSONResponse({"content": response.text})
+                raise Exception("Gemini returned empty response")
+            except Exception as e:
+                log.warning(f"Gemini failed, checking for Ollama fallback: {e}")
+
+        # ─── FINAL FALLBACK: If we reached here, Cloud failed or Ollama was requested ───
+        try:
+            requests.get("http://localhost:11434/api/tags", timeout=1)
             response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": model,
-                    "max_tokens": 1024,
-                    "system": SYSTEM_PROMPT,
-                    "messages": [m for m in messages if m["role"] != "system"]
-                },
+                "http://localhost:11434/api/chat",
+                json={"model": "gemma2:2b", "messages": messages, "stream": False},
                 timeout=60
             )
             if response.ok:
-                return JSONResponse({"content": response.json()["content"][0]["text"]})
-            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Anthropic failed"))
+                return JSONResponse({"content": response.json()["message"]["content"]})
+        except:
+            pass
 
-        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+        raise HTTPException(status_code=500, detail="All AI providers (Cloud and Local) failed to respond. Please check your keys and internet connection.")
 
     except Exception as e:
         log.error(f"Chat error: {e}")
@@ -446,6 +457,50 @@ def serve_ui():
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
+
+def clean_text_for_tts(text: str) -> str:
+    """Removes emojis, markdown, and special characters for cleaner speech."""
+    # Remove markdown links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # Remove code blocks
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    # Remove emojis and special symbols
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    # Remove markdown formatting
+    text = text.replace("*", "").replace("#", "").replace("`", "").replace("_", "")
+    # Clean up whitespace
+    return " ".join(text.split()).strip()
+
+@app.post("/tts")
+async def text_to_speech(body: Dict[str, str]):
+    """Convert text to speech using edge-tts and stream it back."""
+    text = body.get("text", "")
+    voice = body.get("voice", "en-US-AvaNeural")
+    
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    cleaned = clean_text_for_tts(text)
+    
+    if not cleaned:
+        # If everything was emojis, just return a small silent or generic response
+        cleaned = "I am processing your request."
+    
+    try:
+        communicate = edge_tts.Communicate(cleaned, voice)
+        
+        # Stream the audio directly from memory
+        audio_data = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data.write(chunk["data"])
+        
+        audio_data.seek(0)
+        return StreamingResponse(audio_data, media_type="audio/mpeg")
+        
+    except Exception as e:
+        log.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

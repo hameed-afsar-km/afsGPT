@@ -41,44 +41,30 @@ function cleanTextForTTS(text: string): string {
 
 export async function POST(req: NextRequest) {
     try {
-        const { text, voice = "en-US-AvaNeural" } = await req.json();
+        const body = await req.json();
+        const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
 
-        if (!text) {
-            return NextResponse.json({ error: "Text is required" }, { status: 400 });
+        const response = await fetch(`${RAG_SERVER}/tts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ error: "TTS failed on backend" }));
+            return NextResponse.json(err, { status: response.status });
         }
 
-        const cleanedText = cleanTextForTTS(text);
-
-        if (!cleanedText) {
-            return NextResponse.json({ error: "No readable text provided" }, { status: 400 });
-        }
-
-        // Use a temp file so we avoid piping issues
-        const tmpFile = path.join(tmpdir(), `tts-${randomUUID()}.mp3`);
-
-        // Resolve python from the project .venv (one level up from /frontend)
-        const pythonPath = path.join(process.cwd(), "..", ".venv", "Scripts", "python.exe");
-
-        await execFileAsync(pythonPath, [
-            "-m", "edge_tts",
-            "--text", cleanedText,
-            "--voice", voice,
-            "--write-media", tmpFile,
-        ]);
-
-        const audioBuffer = await readFile(tmpFile);
-
-        // Clean up temp file (don't await – fire and forget)
-        unlink(tmpFile).catch(() => {});
+        const audioBuffer = await response.arrayBuffer();
 
         return new NextResponse(audioBuffer, {
             headers: {
                 "Content-Type": "audio/mpeg",
-                "Content-Length": audioBuffer.length.toString(),
+                "Content-Length": audioBuffer.byteLength.toString(),
             },
         });
     } catch (error: any) {
-        console.error("TTS error:", error?.message ?? error);
-        return NextResponse.json({ error: "TTS generation failed" }, { status: 500 });
+        console.error("TTS proxy error:", error);
+        return NextResponse.json({ error: "TTS proxy failed" }, { status: 500 });
     }
 }

@@ -128,6 +128,7 @@ export function ProviderSelector() {
 
     const handleProviderSelect = (providerId: string) => {
         setSelectedProvider(providerId);
+        setModels([]); // Clear models immediately when switching providers
         const savedKeys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
         setApiKey(savedKeys[providerId] || "");
         setShowApiKeyInput(false);

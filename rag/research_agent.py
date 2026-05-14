@@ -55,8 +55,10 @@ def get_llm(provider: str, model: str, api_key: str):
     
     if provider == "gemini" or (provider == "ollama" and google_key):
         from langchain_google_genai import ChatGoogleGenerativeAI
+        # If user selected a gemini model, use it. If they selected ollama but we're on cloud, fallback to flash.
+        target_model = model if (provider == "gemini" and model) else "gemini-1.5-flash"
         return ChatGoogleGenerativeAI(
-            model=model if provider == "gemini" and model else "gemini-1.5-flash",
+            model=target_model,
             google_api_key=google_key,
             temperature=0.3
         )
@@ -64,12 +66,12 @@ def get_llm(provider: str, model: str, api_key: str):
     if provider == "openai":
         from langchain_openai import ChatOpenAI
         key = api_key or os.environ.get("OPENAI_API_KEY")
-        return ChatOpenAI(model=model or "gpt-4o-mini", api_key=key, temperature=0.3)
+        return ChatOpenAI(model=model, api_key=key, temperature=0.3)
     
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        return ChatAnthropic(model=model or "claude-3-haiku-20240307", api_key=key, temperature=0.3)
+        return ChatAnthropic(model=model, api_key=key, temperature=0.3)
     
     # Final Fallback: Ollama (Local)
     return ChatOllama(model="gemma2:2b", temperature=0.3)

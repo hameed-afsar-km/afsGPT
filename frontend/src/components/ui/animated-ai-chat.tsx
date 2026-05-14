@@ -874,6 +874,10 @@ export function AnimatedAIChat() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    
+    // Save user message to Firestore immediately (Optimistic)
+    await sendMessageToFirestore(chatId, userMessage);
+
     setAttachedImage(null);
     setValue("");
     adjustHeight(true);
@@ -882,6 +886,7 @@ export function AnimatedAIChat() {
     try {
       const controller = new AbortController();
       abortControllersRef.current.set(chatId, controller);
+      
       const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
       const apiKey = keys["gemini"] || "";
 
@@ -901,10 +906,9 @@ export function AnimatedAIChat() {
         role: "assistant",
         content: data.answer || data.error || data.detail || "No response from LLaVA.",
         timestamp: new Date(),
+        isNew: true,
       };
       setMessages((prev) => [...prev, assistantMessage]);
-
-      await sendMessageToFirestore(chatId, userMessage);
       await sendMessageToFirestore(chatId, assistantMessage);
     } catch (err) {
       console.error("Image analysis error:", err);
