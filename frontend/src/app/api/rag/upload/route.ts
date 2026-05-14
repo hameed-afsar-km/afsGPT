@@ -6,6 +6,7 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
+    console.log(`Proxying upload to: ${RAG_SERVER}/upload`);
     const response = await fetch(`${RAG_SERVER}/upload`, {
       method: "POST",
       body: formData,
