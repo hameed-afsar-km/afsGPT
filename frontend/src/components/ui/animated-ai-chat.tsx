@@ -882,6 +882,9 @@ export function AnimatedAIChat() {
     try {
       const controller = new AbortController();
       abortControllersRef.current.set(chatId, controller);
+      const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+      const apiKey = keys["gemini"] || "";
+
       const res = await fetch("/api/rag/analyze-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -889,6 +892,7 @@ export function AnimatedAIChat() {
         body: JSON.stringify({
           image_base64: imageBase64,
           question: question || "Describe this image in detail.",
+          apiKey: apiKey,
         }),
       });
 

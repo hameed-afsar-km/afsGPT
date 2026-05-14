@@ -76,6 +76,7 @@ class ImageGenRequest(BaseModel):
 class ImageAnalyzeRequest(BaseModel):
     image_base64: str
     question: str = "Describe this image in detail."
+    apiKey: Optional[str] = None
 
 class ResearchRequest(BaseModel):
     query: str
@@ -227,7 +228,9 @@ def analyze_image(body: ImageAnalyzeRequest):
         clean_base64 = data if data else body.image_base64
 
         # ─── Google Gemini (Cloud / Render) ─────────────────────────
-        google_api_key = os.environ.get("GOOGLE_API_KEY")
+        # Priority: 1. User's key from UI, 2. Owner's key from Render Env
+        google_api_key = body.apiKey or os.environ.get("GOOGLE_API_KEY")
+        
         if google_api_key:
             log.info("Using Google Gemini for image analysis...")
             genai.configure(api_key=google_api_key)
