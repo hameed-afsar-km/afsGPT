@@ -1,28 +1,17 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# AI & Data
+rag/chroma_db/
+rag/uploads/
+rag/generated_images/
 .env
-.venv
-venv/
-ENV/
-build/
+.venv/
+__pycache__/
+*.pyc
+
+# Frontend
+frontend/.next/
+frontend/node_modules/
+frontend/.env
+frontend/.env.local
 dist/
-*.egg-info/
-
-# Node/Next.js
-node_modules/
-.next/
-out/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# IDEs
-.vscode/
-.idea/
-
-# OS
+build/
 .DS_Store
-Thumbs.db

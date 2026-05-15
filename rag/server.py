@@ -231,32 +231,67 @@ def analyze_image(body: ImageAnalyzeRequest):
         clean_base64 = data if data else body.image_base64
 
         # ─── Google Gemini (Cloud / Render) ─────────────────────────
-        # Priority: 1. User's key from UI, 2. Owner's key from Render Env
         google_api_key = body.apiKey or os.environ.get("GOOGLE_API_KEY")
-        
         if google_api_key:
-            log.info("Using Google Gemini for image analysis...")
             try:
+                log.info("Attempting Gemini image analysis...")
                 genai.configure(api_key=google_api_key)
-                # Using 'gemini-1.5-flash' which is the standard multimodal model
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                # Convert base64 to bytes
                 img_data = base64.b64decode(clean_base64)
-                
-                response = model.generate_content([
-                    body.question,
-                    {'mime_type': 'image/jpeg', 'data': img_data}
-                ])
-                
+                response = model.generate_content([body.question, {'mime_type': 'image/jpeg', 'data': img_data}])
                 if response.text:
-                    log.info("Gemini analysis completed successfully.")
                     return JSONResponse({"answer": response.text})
-                else:
-                    raise Exception("Gemini returned an empty response.")
-            except Exception as gemini_err:
-                log.error(f"Gemini analysis failed: {gemini_err}")
-                # Fall through to Ollama if Gemini fails
+            except Exception as e:
+                log.warning(f"Gemini analysis failed: {e}")
+
+        # ─── OpenAI GPT-4o (Cloud / Render) ─────────────────────────
+        openai_key = os.environ.get("OPENAI_API_KEY") # Check Render Env first
+        if not openai_key and body.apiKey and len(body.apiKey) > 40: # Crude check if the provided key might be OpenAI
+            openai_key = body.apiKey
+
+        if openai_key:
+            try:
+                log.info("Attempting OpenAI (GPT-4o) image analysis...")
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": body.question},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                            ]
+                        }
+                    ],
+                    "max_tokens": 500
+                }
+                res = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=60
+                )
+                if res.ok:
+                    return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+            except Exception as e:
+                log.warning(f"OpenAI image analysis failed: {e}")
+
+        # ─── Ollama (Local Fallback) ──────────────────────────────
+        try:
+            log.info("Falling back to local Ollama (moondream)...")
+            response = ollama.chat(
+                model="moondream",
+                messages=[{"role": "user", "content": body.question, "images": [clean_base64]}]
+            )
+            if response and 'message' in response:
+                return JSONResponse({"answer": response['message']['content']})
+        except:
+            pass
+
+        raise HTTPException(
+            status_code=400, 
+            detail="Image analysis failed. Please ensure you have entered a valid Gemini or OpenAI API key in the settings."
+        )
 
         # ─── Ollama (Local Fallback) ──────────────────────────────
         log.info(f"Calling Ollama with model moondream... (Image size: {len(clean_base64)} chars)")
