@@ -47,10 +47,7 @@ import uvicorn
 # Allow sibling imports (vector, rag_chain live in same dir)
 sys.path.insert(0, os.path.dirname(__file__))
 
-from vector import ingest_file, clear_collection, clear_all_collections
-from rag_chain import query
-from image_gen import generate_image
-from research_agent import run_research
+# Lazy imports moved to routes for faster startup
 
 # ─── App setup ────────────────────────────────────────────────────────────────
 
@@ -158,6 +155,9 @@ def upload_file(
 
     log.info(f"[{session_id}] Saved '{file.filename}' → '{save_path}'")
 
+    # Lazy import
+    from vector import ingest_file
+    
     # --- Conditional Ingestion ---
     try:
         # If API key is provided, we skip local ingestion (ChromaDB/Ollama) 
@@ -324,6 +324,8 @@ async def ask_question(body: QueryRequest):
 
     # ─── Standard RAG Logic (Ollama / ChromaDB) ───────────────────────────
     try:
+        # Lazy import
+        from rag_chain import query
         # Pass apiKey to the RAG chain logic
         answer = query(question=body.question, collection_name=body.session_id, api_key=body.apiKey)
         log.info(f"[{body.session_id}] Answer generated.")
@@ -337,9 +339,8 @@ async def ask_question(body: QueryRequest):
 @app.post("/generate-image")
 async def create_image(body: ImageGenRequest):
     """Generates an image via FLUX.1 using Qwen-enhanced prompt."""
-    if not body.prompt.strip():
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
-    
+    # Lazy import
+    from image_gen import generate_image
     result = generate_image(body.prompt, IMAGES_DIR)
     
     if "error" in result:
@@ -352,6 +353,8 @@ async def create_image(body: ImageGenRequest):
 async def clear_session(body: ClearRequest):
     """Delete all documents in a session collection."""
     try:
+        # Lazy import
+        from vector import clear_collection
         clear_collection(collection_name=body.session_id)
         log.info(f"[{body.session_id}] Collection cleared.")
     except Exception as e:
@@ -371,6 +374,8 @@ async def research_query(body: ResearchRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
     log.info(f"[Research] Starting research for: {body.query[:80]}")
     try:
+        # Lazy import
+        from research_agent import run_research
         answer = run_research(
             query=body.query,
             provider=body.provider,
@@ -580,6 +585,8 @@ def analyze_image(body: ImageAnalyzeRequest):
 async def clear_all_sessions():
     """Delete all documents in all collections."""
     try:
+        # Lazy import
+        from vector import clear_all_collections
         clear_all_collections()
         log.info("All collections cleared.")
         
