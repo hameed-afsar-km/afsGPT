@@ -1913,7 +1913,7 @@ export function AnimatedAIChat() {
                   >
                     <FileText className="w-3.5 h-3.5 text-violet-400" />
                     <span className="text-white/80 max-w-[150px] truncate font-medium">
-                      {fileName}
+                      {fileName.name}
                     </span>
                     <button
                       onClick={() => removeAttachment(idx)}
