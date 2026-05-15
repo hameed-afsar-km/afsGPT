@@ -101,6 +101,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  isNew?: boolean;
 }
 
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
