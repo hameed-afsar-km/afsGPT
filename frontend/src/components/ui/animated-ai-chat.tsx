@@ -219,7 +219,7 @@ export function AnimatedAIChat() {
   const [ragSessionId, setRagSessionId] = useState<string | null>(null);
   const [ragFileName, setRagFileName] = useState<string | null>(null);
   const [fileAttachedToNextMessage, setFileAttachedToNextMessage] = useState<
-    string[]
+    Array<{ name: string; thumbnail?: string }>
   >([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -458,7 +458,11 @@ export function AnimatedAIChat() {
         timestamp: new Date(),
         attachments:
           fileAttachedToNextMessage.length > 0
-            ? [...fileAttachedToNextMessage]
+            ? fileAttachedToNextMessage.map(f => f.name)
+            : [],
+        thumbnails:
+          fileAttachedToNextMessage.length > 0
+            ? fileAttachedToNextMessage.map(f => f.thumbnail).filter(Boolean)
             : [],
       };
 
@@ -791,7 +795,7 @@ export function AnimatedAIChat() {
           setIsChatMode(true);
         } else {
           currentSessionId = data.session_id;
-          newAttached.push(file.name);
+          newAttached.push({ name: file.name, thumbnail: data.thumbnail });
         }
       } catch (err: any) {
         const errMsg: any = {
@@ -810,7 +814,7 @@ export function AnimatedAIChat() {
     }
     if (newAttached.length > 0) {
       setRagFileName((prev) =>
-        prev ? `${prev}, ${newAttached.join(", ")}` : newAttached.join(", "),
+        prev ? `${prev}, ${newAttached.map(f => f.name).join(", ")}` : newAttached.map(f => f.name).join(", "),
       );
       setFileAttachedToNextMessage((prev) => [...prev, ...newAttached]);
     }
@@ -1342,18 +1346,33 @@ export function AnimatedAIChat() {
                             </div>
                           )}
                           {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="flex flex-col gap-2 mb-3">
-                              {msg.attachments.map((att: string, i: number) => (
-                                <div
-                                  key={i}
-                                  className="flex items-center gap-2 bg-white/10 px-3 py-2 rounded-xl border border-white/20 w-fit"
-                                >
-                                  <FileText className="w-4 h-4 text-violet-300" />
-                                  <span className="text-xs text-white/90 font-medium">
-                                    {att}
-                                  </span>
-                                </div>
-                              ))}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {msg.attachments.map((att: string, i: number) => {
+                                const thumbnail = msg.thumbnails?.[i];
+                                return (
+                                  <div
+                                    key={i}
+                                    className="flex flex-col gap-2 p-1.5 bg-white/5 rounded-2xl border border-white/10 group/att"
+                                  >
+                                    {thumbnail && (
+                                      <div className="relative w-32 aspect-[3/4] rounded-xl overflow-hidden bg-black/40 border border-white/10">
+                                        <img 
+                                          src={thumbnail} 
+                                          alt={att} 
+                                          className="w-full h-full object-cover transition-transform group-hover/att:scale-105" 
+                                        />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-2 px-2 py-1">
+                                      <FileText className="w-3.5 h-3.5 text-violet-300" />
+                                      <span className="text-[10px] text-white/70 font-medium truncate max-w-[100px]">
+                                        {att}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                           {msg.role === "user" && editingMessageIndex === idx ? (

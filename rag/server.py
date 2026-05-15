@@ -27,6 +27,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# For Document Thumbnails
+try:
+    import fitz 
+except ImportError:
+    fitz = None
+
 # New Google GenAI SDK for Direct PDF Analysis
 try:
     from google import genai as new_genai
@@ -58,11 +64,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-IMAGES_DIR = os.path.join(STATIC_DIR, "images")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(IMAGES_DIR, exist_ok=True)
+UPLOAD_DIR     = os.path.join(os.path.dirname(__file__), "uploads")
+STATIC_DIR     = os.path.join(os.path.dirname(__file__), "static")
+IMAGES_DIR     = os.path.join(STATIC_DIR, "images")
+THUMBNAILS_DIR = os.path.join(STATIC_DIR, "thumbnails")
+
+for d in [UPLOAD_DIR, STATIC_DIR, IMAGES_DIR, THUMBNAILS_DIR]:
+    os.makedirs(d, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -147,20 +155,49 @@ def upload_file(
 
     log.info(f"[{session_id}] Saved '{file.filename}' → '{save_path}'")
 
+    # --- Conditional Ingestion ---
     try:
-        ingest_file(path=save_path, collection_name=session_id, api_key=apiKey)
-        log.info(f"[{session_id}] Ingested '{file.filename}' into ChromaDB.")
+        # If API key is provided, we skip local ingestion (ChromaDB/Ollama) 
+        # because we will use Direct Analysis in the /query route.
+        if apiKey:
+            log.info(f"[{session_id}] Cloud Mode detected. Skipping local ingestion for {file.filename}.")
+        else:
+            log.info(f"[{session_id}] Local Mode detected. Ingesting {file.filename} into ChromaDB...")
+            ingest_file(path=save_path, collection_name=session_id, api_key=apiKey)
+            log.info(f"[{session_id}] Ingested '{file.filename}' into ChromaDB.")
     except Exception as e:
         log.error(f"[{session_id}] Ingestion failed: {e}")
         raise HTTPException(status_code=500, detail=f"Ingestion error: {str(e)}")
-    finally:
-        # Remove temp file after ingestion
+
+    # --- Generate Thumbnail for PDFs ---
+    thumbnail_url = None
+    if ext == ".pdf" and fitz:
+        try:
+            # Create a unique thumbnail filename
+            thumb_filename = f"thumb_{session_id}_{uuid.uuid4().hex[:8]}.png"
+            thumb_path = os.path.join(THUMBNAILS_DIR, thumb_filename)
+            
+            doc_pdf = fitz.open(save_path)
+            if len(doc_pdf) > 0:
+                page = doc_pdf[0]
+                # Scale down for a thumbnail
+                pix = page.get_pixmap(matrix=fitz.Matrix(0.3, 0.3)) 
+                pix.save(thumb_path)
+                thumbnail_url = f"/static/thumbnails/{thumb_filename}"
+            doc_pdf.close()
+        except Exception as te:
+            log.warning(f"Failed to generate thumbnail: {te}")
+
+    # Note: We NO LONGER delete the file in 'finally' if it's a PDF 
+    # because direct_document_analysis needs it for cloud mode.
+    if ext != ".pdf":
         if os.path.exists(save_path):
             os.remove(save_path)
 
     return JSONResponse({
         "session_id": session_id,
         "filename":   file.filename,
+        "thumbnail":  thumbnail_url,
         "message":    "File received. Analysis mode: Cloud Direct (No-DB)." if ".pdf" in file.filename.lower() else "File ingested into database."
     })
 

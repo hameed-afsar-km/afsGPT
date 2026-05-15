@@ -4,11 +4,12 @@ import { X, Moon, Sun, Monitor, Bell, Shield, User, Globe } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 import { useState, useEffect } from "react";
 import { Key, Save, CheckCircle2 } from "lucide-react";
 import { ConfirmModal } from "./confirm-modal";
+import { useChat } from "@/context/ChatContext";
 
 interface SettingsDialogProps {
     isOpen: boolean;
@@ -17,6 +18,7 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     const { user, logout, login } = useAuth();
+    const { setActiveChatId } = useChat();
     const [activeTab, setActiveTab] = useState("General");
     const [apiKeys, setApiKeys] = useState<{ [key: string]: string }>({
         openai: "",
@@ -62,6 +64,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             const imgDeletePromises = imgSnapshot.docs.map(d => deleteDoc(doc(db, `users/${user.uid}/images`, d.id)));
 
             await Promise.all([...deletePromises, ...imgDeletePromises]);
+            setActiveChatId(null);
             onClose();
         } catch (error) {
             console.error("Error clearing history:", error);

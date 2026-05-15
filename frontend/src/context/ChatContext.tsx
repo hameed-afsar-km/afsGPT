@@ -24,6 +24,7 @@ interface Message {
     timestamp: any;
     attachments?: string[];
     isNew?: boolean;
+    thumbnails?: string[];
 }
 
 export interface GeneratedImage {
