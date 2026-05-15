@@ -13,22 +13,26 @@ import os
 import sys
 import uuid
 import shutil
-import logging
 import base64
-import ollama
-import google.generativeai as genai
+import logging
 import re
 import requests
-import edge_tts
-import io
-
-
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import asyncio
+import ollama
+import google.generativeai as genai
 from typing import List, Optional, Dict
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+# New Google GenAI SDK for Direct PDF Analysis
+try:
+    from google import genai as new_genai
+    from google.genai import types as genai_types
+except ImportError:
+    new_genai = None
 import uvicorn
 
 # Allow sibling imports (vector, rag_chain live in same dir)
@@ -81,6 +85,8 @@ class ImageAnalyzeRequest(BaseModel):
     image_base64: str
     question: str = "Describe this image in detail."
     apiKey: Optional[str] = None
+    model: Optional[str] = "gemini-1.5-flash"
+    provider: Optional[str] = "gemini"
 
 class ResearchRequest(BaseModel):
     query: str
@@ -153,17 +159,59 @@ def upload_file(
     return JSONResponse({
         "session_id": session_id,
         "filename":   file.filename,
-        "message":    "File ingested successfully. You can now ask questions."
+        "message":    "File received. Analysis mode: Cloud Direct (No-DB)." if ".pdf" in file.filename.lower() else "File ingested into database."
     })
 
 
+async def direct_gemini_analysis(question: str, file_path: str, api_key: str, model_name: str = "gemini-1.5-flash"):
+    """Sends the entire PDF directly to Gemini for analysis (No-DB RAG)."""
+    try:
+        if not new_genai:
+            return "Cloud analysis failed: google-genai SDK not installed."
+
+        client = new_genai.Client(api_key=api_key)
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        # Handle preview model naming
+        target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-1.5-flash"
+        if "2.5" in target_model or "3.0" in target_model:
+            api_model = "gemini-1.5-flash"
+        else:
+            api_model = target_model
+
+        response = client.models.generate_content(
+            model=api_model,
+            contents=[
+                genai_types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
+                question
+            ]
+        )
+        return response.text
+    except Exception as e:
+        log.error(f"Direct Gemini Analysis failed: {e}")
+        return f"Cloud analysis failed: {str(e)}"
+
+
 @app.post("/query")
-def ask_question(body: QueryRequest):
+async def ask_question(body: QueryRequest):
     """Answer a question using the documents in a given session collection."""
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     log.info(f"[{body.session_id}] Question: {body.question}")
+    
+    # ─── New Direct Gemini Logic (Bypass DB for PDFs on Render) ───────────
+    if body.apiKey and body.session_id:
+        # Find the uploaded file for this session
+        potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id) and f.lower().endswith(".pdf")]
+        if potential_files:
+            file_path = os.path.join(UPLOAD_DIR, potential_files[0])
+            log.info(f"[{body.session_id}] Using Direct Gemini Mode for {potential_files[0]}")
+            answer = await direct_gemini_analysis(body.question, file_path, body.apiKey)
+            return JSONResponse({"answer": answer})
+
+    # ─── Standard RAG Logic (Ollama / ChromaDB) ───────────────────────────
     try:
         # Pass apiKey to the RAG chain logic
         answer = query(question=body.question, collection_name=body.session_id, api_key=body.apiKey)
@@ -236,26 +284,56 @@ def analyze_image(body: ImageAnalyzeRequest):
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
 
-        # ─── Google Gemini (Cloud / Render) ─────────────────────────
-        google_api_key = body.apiKey or os.environ.get("GOOGLE_API_KEY")
-        if google_api_key:
+        # ─── Smart Provider Detection ───────────────────────────────
+        api_key = body.apiKey or os.environ.get("GOOGLE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        selected_provider = body.provider.lower() if body.provider else "gemini"
+        
+        errors = []
+
+        # If the key looks like OpenAI (starts with sk-), override provider
+        if api_key and api_key.startswith("sk-"):
+            selected_provider = "openai"
+        elif api_key and (api_key.startswith("AIza") or len(api_key) < 45):
+            selected_provider = "gemini"
+
+        # ─── Google Gemini ──────────────────────────────────────────
+        if selected_provider == "gemini" and api_key:
             try:
-                log.info("Attempting Gemini image analysis...")
-                genai.configure(api_key=google_api_key)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                img_data = base64.b64decode(clean_base64)
-                response = model.generate_content([body.question, {'mime_type': 'image/jpeg', 'data': img_data}])
-                if response.text:
-                    return JSONResponse({"answer": response.text})
+                log.info(f"Attempting Gemini image analysis with {body.model}...")
+                
+                target_model = body.model if body.model and "gemini" in body.model.lower() else "gemini-1.5-flash"
+                if "2.5" in target_model or "3.0" in target_model:
+                    api_model = "gemini-1.5-flash" 
+                else:
+                    api_model = target_model
+
+                # Use New SDK if available, else Old SDK
+                if new_genai:
+                    client = new_genai.Client(api_key=api_key)
+                    img_data = base64.b64decode(clean_base64)
+                    response = client.models.generate_content(
+                        model=api_model,
+                        contents=[
+                            genai_types.Part.from_bytes(data=img_data, mime_type='image/jpeg'),
+                            body.question
+                        ]
+                    )
+                    if response.text:
+                        return JSONResponse({"answer": response.text})
+                else:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel(api_model)
+                    img_data = base64.b64decode(clean_base64)
+                    response = model.generate_content([body.question, {'mime_type': 'image/jpeg', 'data': img_data}])
+                    if response.text:
+                        return JSONResponse({"answer": response.text})
             except Exception as e:
-                log.warning(f"Gemini analysis failed: {e}")
+                err_msg = f"Gemini Error: {str(e)}"
+                log.warning(err_msg)
+                errors.append(err_msg)
 
-        # ─── OpenAI GPT-4o (Cloud / Render) ─────────────────────────
-        openai_key = os.environ.get("OPENAI_API_KEY") # Check Render Env first
-        if not openai_key and body.apiKey and len(body.apiKey) > 40: # Crude check if the provided key might be OpenAI
-            openai_key = body.apiKey
-
-        if openai_key:
+        # ─── OpenAI GPT-4o ──────────────────────────────────────────
+        if (selected_provider == "openai" or not selected_provider) and api_key:
             try:
                 log.info("Attempting OpenAI (GPT-4o) image analysis...")
                 payload = {
@@ -273,14 +351,20 @@ def analyze_image(body: ImageAnalyzeRequest):
                 }
                 res = requests.post(
                     "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json=payload,
                     timeout=60
                 )
                 if res.ok:
                     return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+                else:
+                    err_msg = f"OpenAI API Error: {res.text}"
+                    log.error(err_msg)
+                    errors.append(err_msg)
             except Exception as e:
-                log.warning(f"OpenAI image analysis failed: {e}")
+                err_msg = f"OpenAI Exception: {str(e)}"
+                log.warning(err_msg)
+                errors.append(err_msg)
 
         # ─── Ollama (Local Fallback) ──────────────────────────────
         try:
@@ -291,12 +375,16 @@ def analyze_image(body: ImageAnalyzeRequest):
             )
             if response and 'message' in response:
                 return JSONResponse({"answer": response['message']['content']})
-        except:
-            pass
+        except Exception as e:
+            err_msg = f"Ollama Local Error: {str(e)}"
+            log.error(err_msg)
+            errors.append(err_msg)
 
+        # Final Error reporting
+        combined_errors = " | ".join(errors) if errors else "No API key provided and local Ollama not found."
         raise HTTPException(
             status_code=400, 
-            detail="Image analysis failed. Please ensure you have entered a valid Gemini or OpenAI API key in the settings."
+            detail=f"Image analysis failed. {combined_errors}"
         )
 
         # ─── Ollama (Local Fallback) ──────────────────────────────

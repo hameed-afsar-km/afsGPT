@@ -888,8 +888,10 @@ export function AnimatedAIChat() {
       const controller = new AbortController();
       abortControllersRef.current.set(chatId, controller);
       
+      const savedProvider = localStorage.getItem("afs-provider") || "gemini";
       const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
-      const apiKey = keys["gemini"] || "";
+      const apiKey = keys[savedProvider] || "";
+      const savedModel = localStorage.getItem("afs-model") || "gemini-1.5-flash";
 
       const res = await fetch("/api/rag/analyze-image", {
         method: "POST",
