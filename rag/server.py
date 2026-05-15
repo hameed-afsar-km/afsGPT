@@ -69,6 +69,7 @@ ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
 class QueryRequest(BaseModel):
     session_id: str
     question:   str
+    apiKey: Optional[str] = None
 
 class ClearRequest(BaseModel):
     session_id: str
@@ -112,7 +113,11 @@ def health_check():
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.post("/upload")
-def upload_file(file: UploadFile = File(...), session_id: Optional[str] = Form(None)):
+def upload_file(
+    file: UploadFile = File(...), 
+    session_id: Optional[str] = Form(None),
+    apiKey: Optional[str] = Form(None)
+):
     """
     Receive an uploaded file, save it temporarily,
     ingest into a unique ChromaDB collection, return a session_id.
@@ -135,7 +140,7 @@ def upload_file(file: UploadFile = File(...), session_id: Optional[str] = Form(N
     log.info(f"[{session_id}] Saved '{file.filename}' → '{save_path}'")
 
     try:
-        ingest_file(path=save_path, collection_name=session_id)
+        ingest_file(path=save_path, collection_name=session_id, api_key=apiKey)
         log.info(f"[{session_id}] Ingested '{file.filename}' into ChromaDB.")
     except Exception as e:
         log.error(f"[{session_id}] Ingestion failed: {e}")
@@ -160,7 +165,8 @@ def ask_question(body: QueryRequest):
 
     log.info(f"[{body.session_id}] Question: {body.question}")
     try:
-        answer = query(question=body.question, collection_name=body.session_id)
+        # Pass apiKey to the RAG chain logic
+        answer = query(question=body.question, collection_name=body.session_id, api_key=body.apiKey)
         log.info(f"[{body.session_id}] Answer generated.")
     except Exception as e:
         log.error(f"[{body.session_id}] Query error: {e}")

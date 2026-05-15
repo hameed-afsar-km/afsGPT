@@ -10,15 +10,18 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from vector import get_retriever
 
+from typing import Optional
+
 # ─── LLM ──────────────────────────────────────────────────────────────────────
 
 LLM_MODEL = "gemma2:2b"    # swap to any model pulled via `ollama pull`
 
-# Use Google Gemini if API key is present (Cloud/Render), otherwise fallback to Ollama (Local)
-if os.environ.get("GOOGLE_API_KEY"):
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
-else:
-    llm = OllamaLLM(model=LLM_MODEL)
+def get_llm(api_key: Optional[str] = None):
+    """Dynamically choose the LLM for RAG."""
+    google_key = api_key or os.environ.get("GOOGLE_API_KEY")
+    if google_key:
+        return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_key)
+    return OllamaLLM(model=LLM_MODEL)
 
 
 # ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -45,9 +48,10 @@ def _format_docs(docs) -> str:
     return "\n\n---\n\n".join(doc.page_content for doc in docs)
 
 
-def build_rag_chain(collection_name: str = "rag_store"):
+def build_rag_chain(collection_name: str = "rag_store", api_key: Optional[str] = None):
     """Return a runnable RAG chain for the given ChromaDB collection."""
-    retriever = get_retriever(collection_name=collection_name)
+    retriever = get_retriever(collection_name=collection_name, api_key=api_key)
+    llm = get_llm(api_key=api_key)
 
     chain = (
         {
@@ -61,7 +65,7 @@ def build_rag_chain(collection_name: str = "rag_store"):
     return chain
 
 
-def query(question: str, collection_name: str = "rag_store") -> str:
+def query(question: str, collection_name: str = "rag_store", api_key: Optional[str] = None) -> str:
     """Convenience function: build chain and invoke with a question."""
-    chain = build_rag_chain(collection_name=collection_name)
+    chain = build_rag_chain(collection_name=collection_name, api_key=api_key)
     return chain.invoke(question)

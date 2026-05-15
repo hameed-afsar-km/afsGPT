@@ -14,6 +14,7 @@ try:
 except ImportError:
     pass
 
+from typing import Optional
 import pandas as pd
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
@@ -27,11 +28,12 @@ EMBED_MODEL = "nomic-embed-text"          # pull with: ollama pull nomic-embed-t
 CHUNK_SIZE  = 1000
 CHUNK_OVERLAP = 150
 
-# Use Google Gemini Embeddings if API key is present (Cloud/Render), otherwise fallback to Ollama (Local)
-if os.environ.get("GOOGLE_API_KEY"):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-else:
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL)
+def get_embeddings(api_key: Optional[str] = None):
+    """Dynamically choose embeddings based on available keys."""
+    google_key = api_key or os.environ.get("GOOGLE_API_KEY")
+    if google_key:
+        return GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_key)
+    return OllamaEmbeddings(model=EMBED_MODEL)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,28 +90,37 @@ def load_file(path: str) -> list[Document]:
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-def ingest_file(path: str, collection_name: str = "rag_store") -> Chroma:
+def ingest_file(path: str, collection_name: str = "rag_store", api_key: Optional[str] = None) -> Chroma:
     """
     Load, chunk, embed, and persist a file into ChromaDB.
     Returns the Chroma vector store.
     """
     docs   = load_file(path)
+    # Ensure there is actually some text in the documents
+    docs = [d for d in docs if d.page_content.strip()]
+    
+    if not docs:
+        raise ValueError("The uploaded file contains no readable text. It might be a scanned image or empty.")
+        
     chunks = _split(docs)
+    if not chunks:
+        # Fallback: Use the original documents if they couldn't be split
+        chunks = docs
 
     db = Chroma(
         collection_name=collection_name,
-        embedding_function=embeddings,
+        embedding_function=get_embeddings(api_key),
         persist_directory=CHROMA_DIR,
     )
     db.add_documents(chunks)
     return db
 
 
-def get_retriever(collection_name: str = "rag_store", k: int = 5):
+def get_retriever(collection_name: str = "rag_store", k: int = 5, api_key: Optional[str] = None):
     """Return a retriever over an existing ChromaDB collection."""
     db = Chroma(
         collection_name=collection_name,
-        embedding_function=embeddings,
+        embedding_function=get_embeddings(api_key),
         persist_directory=CHROMA_DIR,
     )
     return db.as_retriever(search_kwargs={"k": k})
@@ -119,7 +130,7 @@ def clear_collection(collection_name: str = "rag_store"):
     """Wipe all documents from a collection (fresh session)."""
     db = Chroma(
         collection_name=collection_name,
-        embedding_function=embeddings,
+        embedding_function=get_embeddings(), # Default is fine for deletion
         persist_directory=CHROMA_DIR,
     )
     db.delete_collection()
