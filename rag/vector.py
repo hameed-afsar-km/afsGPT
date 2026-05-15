@@ -16,8 +16,17 @@ except ImportError:
 
 from typing import Optional
 import pandas as pd
-from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    try:
+        from langchain.vectorstores import Chroma
+    except ImportError:
+        Chroma = None
+try:
+    from langchain_ollama import OllamaEmbeddings
+except ImportError:
+    OllamaEmbeddings = None
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
