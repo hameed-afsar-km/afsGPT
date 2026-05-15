@@ -13,3 +13,4 @@ edge-tts
 google-genai
 requests
 pymupdf
+ollama

@@ -18,7 +18,10 @@ import logging
 import re
 import requests
 import asyncio
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 import google.generativeai as genai
 from typing import List, Optional, Dict
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException

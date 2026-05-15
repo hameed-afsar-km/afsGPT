@@ -755,7 +755,7 @@ export function AnimatedAIChat() {
 
   const uploadFilesToRAG = async (files: File[]) => {
     let currentSessionId = ragSessionId;
-    const newAttached: string[] = [];
+    const newAttached: Array<{ name: string; thumbnail?: string }> = [];
     setIsUploading(true);
 
     for (const file of files) {
