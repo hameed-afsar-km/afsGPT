@@ -75,7 +75,7 @@ class QueryRequest(BaseModel):
     question:   str
     apiKey: Optional[str] = None
     provider: Optional[str] = "gemini"
-    model: Optional[str] = "gemini-1.5-flash"
+    model: Optional[str] = "gemini-2.5-flash"
 
 class ClearRequest(BaseModel):
     session_id: str
@@ -87,7 +87,7 @@ class ImageAnalyzeRequest(BaseModel):
     image_base64: str
     question: str = "Describe this image in detail."
     apiKey: Optional[str] = None
-    model: Optional[str] = "gemini-1.5-flash"
+    model: Optional[str] = "gemini-2.5-flash"
     provider: Optional[str] = "gemini"
 
 class ResearchRequest(BaseModel):
@@ -165,7 +165,7 @@ def upload_file(
     })
 
 
-async def direct_document_analysis(question: str, file_path: str, api_key: str, provider: str = "gemini", model_name: str = "gemini-1.5-flash"):
+async def direct_document_analysis(question: str, file_path: str, api_key: str, provider: str = "gemini", model_name: str = "gemini-2.5-flash"):
     """Sends the document directly to the selected AI for analysis (No-DB RAG)."""
     try:
         provider = provider.lower() if provider else "gemini"
@@ -178,7 +178,7 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
             with open(file_path, "rb") as f:
                 pdf_bytes = f.read()
 
-            target_model = model_name if model_name else "gemini-1.5-flash"
+            target_model = model_name if model_name else "gemini-2.5-flash"
             response = client.models.generate_content(
                 model=target_model,
                 contents=[
@@ -366,7 +366,7 @@ def analyze_image(body: ImageAnalyzeRequest):
             try:
                 log.info(f"Attempting Gemini image analysis with {body.model}...")
                 
-                target_model = body.model if body.model else "gemini-1.5-flash"
+                target_model = body.model if body.model else "gemini-2.5-flash"
                 api_model = target_model
 
                 # Use New SDK if available, else Old SDK
@@ -593,7 +593,7 @@ async def chat_handler(body: ChatRequest):
                 if os.environ.get("GOOGLE_API_KEY"):
                     log.info("Ollama unavailable, falling back to Gemini for chat.")
                     provider = "gemini"
-                    model = "gemini-1.5-flash"
+                    model = "gemini-2.5-flash"
                     api_key = os.environ.get("GOOGLE_API_KEY")
                 else:
                     raise HTTPException(status_code=503, detail="Ollama is not running and no cloud fallback (GOOGLE_API_KEY) is configured.")
