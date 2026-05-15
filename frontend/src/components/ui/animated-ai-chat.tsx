@@ -598,6 +598,12 @@ export function AnimatedAIChat() {
             }
           } else if (ragSessionId) {
             // ── RAG mode: query the document ──────────────────
+            const provider = localStorage.getItem("afs-provider") || "gemini";
+            const rawModel = localStorage.getItem("afs-model");
+            const model = (rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)" ? (provider === "gemini" ? "gemini-1.5-flash" : "gpt-4o-mini") : rawModel) || "gemini-1.5-flash";
+            const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+            const apiKey = keys[provider] || "";
+
             const ragRes = await fetch("/api/rag/query", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -605,6 +611,9 @@ export function AnimatedAIChat() {
               body: JSON.stringify({
                 session_id: ragSessionId,
                 question: content,
+                provider,
+                model,
+                apiKey
               }),
             });
             const ragData = await ragRes.json();

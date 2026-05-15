@@ -74,6 +74,8 @@ class QueryRequest(BaseModel):
     session_id: str
     question:   str
     apiKey: Optional[str] = None
+    provider: Optional[str] = "gemini"
+    model: Optional[str] = "gemini-1.5-flash"
 
 class ClearRequest(BaseModel):
     session_id: str
@@ -163,33 +165,102 @@ def upload_file(
     })
 
 
-async def direct_gemini_analysis(question: str, file_path: str, api_key: str, model_name: str = "gemini-1.5-flash"):
-    """Sends the entire PDF directly to Gemini for analysis (No-DB RAG)."""
+async def direct_document_analysis(question: str, file_path: str, api_key: str, provider: str = "gemini", model_name: str = "gemini-1.5-flash"):
+    """Sends the document directly to the selected AI for analysis (No-DB RAG)."""
     try:
-        if not new_genai:
-            return "Cloud analysis failed: google-genai SDK not installed."
+        provider = provider.lower() if provider else "gemini"
+        
+        # --- Gemini Native PDF ---
+        if provider == "gemini":
+            if not new_genai:
+                return "Cloud analysis failed: google-genai SDK not installed."
+            client = new_genai.Client(api_key=api_key)
+            with open(file_path, "rb") as f:
+                pdf_bytes = f.read()
 
-        client = new_genai.Client(api_key=api_key)
-        with open(file_path, "rb") as f:
-            pdf_bytes = f.read()
+            target_model = model_name if model_name else "gemini-1.5-flash"
+            response = client.models.generate_content(
+                model=target_model,
+                contents=[
+                    genai_types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
+                    question
+                ]
+            )
+            return response.text
 
-        # Handle preview model naming
-        target_model = model_name if model_name and "gemini" in model_name.lower() else "gemini-1.5-flash"
-        if "2.5" in target_model or "3.0" in target_model:
-            api_model = "gemini-1.5-flash"
-        else:
-            api_model = target_model
+        # --- Anthropic Native PDF ---
+        if provider == "anthropic":
+            with open(file_path, "rb") as f:
+                pdf_b64 = base64.b64encode(f.read()).decode("utf-8")
+            
+            target_model = model_name if model_name else "claude-3-5-sonnet-20240620"
+            payload = {
+                "model": target_model,
+                "max_tokens": 1024,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": pdf_b64
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": question
+                            }
+                        ]
+                    }
+                ]
+            }
+            res = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json=payload,
+                timeout=120
+            )
+            if res.ok:
+                return res.json()["content"][0]["text"]
+            return f"Anthropic error: {res.text}"
 
-        response = client.models.generate_content(
-            model=api_model,
-            contents=[
-                genai_types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
-                question
-            ]
-        )
-        return response.text
+        # --- OpenAI (In-Memory Text Extraction Fallback) ---
+        if provider == "openai":
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(file_path)
+            docs = loader.load()
+            full_text = "\n".join([d.page_content for d in docs])
+            
+            target_model = model_name if model_name else "gpt-4o-mini"
+            payload = {
+                "model": target_model,
+                "messages": [
+                    {"role": "system", "content": f"Document Text:\n{full_text[:100000]}"}, # Truncate to avoid massive payloads
+                    {"role": "user", "content": question}
+                ],
+                "max_tokens": 1000
+            }
+            res = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=120
+            )
+            if res.ok:
+                return res.json()["choices"][0]["message"]["content"]
+            return f"OpenAI error: {res.text}"
+            
+        return "Provider not supported for direct document analysis."
+
     except Exception as e:
-        log.error(f"Direct Gemini Analysis failed: {e}")
+        log.error(f"Direct Document Analysis failed: {e}")
         return f"Cloud analysis failed: {str(e)}"
 
 
@@ -201,14 +272,14 @@ async def ask_question(body: QueryRequest):
 
     log.info(f"[{body.session_id}] Question: {body.question}")
     
-    # ─── New Direct Gemini Logic (Bypass DB for PDFs on Render) ───────────
+    # ─── New Direct Document Logic (Bypass DB for PDFs on Render) ───────────
     if body.apiKey and body.session_id:
         # Find the uploaded file for this session
         potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id) and f.lower().endswith(".pdf")]
         if potential_files:
             file_path = os.path.join(UPLOAD_DIR, potential_files[0])
-            log.info(f"[{body.session_id}] Using Direct Gemini Mode for {potential_files[0]}")
-            answer = await direct_gemini_analysis(body.question, file_path, body.apiKey)
+            log.info(f"[{body.session_id}] Using Direct Analysis Mode ({body.provider}) for {potential_files[0]}")
+            answer = await direct_document_analysis(body.question, file_path, body.apiKey, body.provider, body.model)
             return JSONResponse({"answer": answer})
 
     # ─── Standard RAG Logic (Ollama / ChromaDB) ───────────────────────────
@@ -284,28 +355,19 @@ def analyze_image(body: ImageAnalyzeRequest):
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
 
-        # ─── Smart Provider Detection ───────────────────────────────
-        api_key = body.apiKey or os.environ.get("GOOGLE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        # ─── Strict Provider & Model Adherence ───────────────────────
+        api_key = body.apiKey
         selected_provider = body.provider.lower() if body.provider else "gemini"
         
         errors = []
-
-        # If the key looks like OpenAI (starts with sk-), override provider
-        if api_key and api_key.startswith("sk-"):
-            selected_provider = "openai"
-        elif api_key and (api_key.startswith("AIza") or len(api_key) < 45):
-            selected_provider = "gemini"
 
         # ─── Google Gemini ──────────────────────────────────────────
         if selected_provider == "gemini" and api_key:
             try:
                 log.info(f"Attempting Gemini image analysis with {body.model}...")
                 
-                target_model = body.model if body.model and "gemini" in body.model.lower() else "gemini-1.5-flash"
-                if "2.5" in target_model or "3.0" in target_model:
-                    api_model = "gemini-1.5-flash" 
-                else:
-                    api_model = target_model
+                target_model = body.model if body.model else "gemini-1.5-flash"
+                api_model = target_model
 
                 # Use New SDK if available, else Old SDK
                 if new_genai:
@@ -336,8 +398,9 @@ def analyze_image(body: ImageAnalyzeRequest):
         if (selected_provider == "openai" or not selected_provider) and api_key:
             try:
                 log.info("Attempting OpenAI (GPT-4o) image analysis...")
+                api_model = body.model if body.model else "gpt-4o-mini"
                 payload = {
-                    "model": "gpt-4o-mini",
+                    "model": api_model,
                     "messages": [
                         {
                             "role": "user",
@@ -363,6 +426,57 @@ def analyze_image(body: ImageAnalyzeRequest):
                     errors.append(err_msg)
             except Exception as e:
                 err_msg = f"OpenAI Exception: {str(e)}"
+                log.warning(err_msg)
+                errors.append(err_msg)
+
+        # ─── Anthropic Claude ───────────────────────────────────────
+        if selected_provider == "anthropic" and api_key:
+            try:
+                log.info(f"Attempting Anthropic image analysis with {body.model}...")
+                api_model = body.model if body.model else "claude-3-5-sonnet-20240620"
+                
+                payload = {
+                    "model": api_model,
+                    "max_tokens": 1024,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/jpeg",
+                                        "data": clean_base64
+                                    }
+                                },
+                                {
+                                    "type": "text",
+                                    "text": body.question
+                                }
+                            ]
+                        }
+                    ]
+                }
+                res = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json=payload,
+                    timeout=60
+                )
+                if res.ok:
+                    data = res.json()
+                    return JSONResponse({"answer": data["content"][0]["text"]})
+                else:
+                    err_msg = f"Anthropic API Error: {res.text}"
+                    log.error(err_msg)
+                    errors.append(err_msg)
+            except Exception as e:
+                err_msg = f"Anthropic Exception: {str(e)}"
                 log.warning(err_msg)
                 errors.append(err_msg)
 
