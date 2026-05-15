@@ -476,10 +476,28 @@ async def get_provider_models(body: ModelsRequest):
             return JSONResponse({"models": [m["id"] for m in res.json()["data"] if "gpt" in m["id"]]})
 
     if provider == "gemini":
-        if not api_key: return JSONResponse({"models": ["gemini-1.5-flash", "gemini-1.5-pro"]})
-        res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}")
-        if res.ok:
-            return JSONResponse({"models": [m["name"].split("/")[-1] for m in res.json()["models"] if "generateContent" in m["supportedGenerationMethods"]]})
+        # Return defaults if no key is provided or API fetch fails
+        defaults = [
+            "gemini-1.5-flash", "gemini-1.5-pro",
+            "gemini-2.0-flash", "gemini-2.0-pro",
+            "gemini-2.5-flash", "gemini-2.5-pro",
+            "gemini-3.0-flash", "gemini-3.0-pro"
+        ]
+        if not api_key: 
+            return JSONResponse({"models": defaults})
+        
+        try:
+            res = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}", timeout=5)
+            if res.ok:
+                data = res.json()
+                if "models" in data:
+                    models = [m["name"].split("/")[-1] for m in data["models"] if "generateContent" in m.get("supportedGenerationMethods", [])]
+                    if models: return JSONResponse({"models": models})
+        except Exception as e:
+            log.warning(f"Failed to fetch Gemini models from API: {e}")
+            
+        # If API call failed or returned empty, return the hardcoded defaults
+        return JSONResponse({"models": defaults})
 
     if provider == "anthropic":
         return JSONResponse({"models": ["claude-3-5-sonnet-20240620", "claude-3-haiku-20240307", "claude-3-opus-20240229"]})
