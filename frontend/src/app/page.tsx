@@ -9,6 +9,8 @@ export default function LandingPage() {
   const [textIndex, setTextIndex] = useState(0);
   const [navTextIndex, setNavTextIndex] = useState(0);
   const [isContactOpen, setIsContactOpen] = useState(false);
+  const [formStatus, setFormStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [formData, setFormData] = useState({ name: '', email: '', message: '' });
   const rotatingTexts = [
     "Without Limits.",
     "That Speaks.",
@@ -39,6 +41,27 @@ export default function LandingPage() {
 
   const backgroundX = useTransform(smoothX, [-500, 500], [20, -20]);
   const backgroundY = useTransform(smoothY, [-500, 500], [20, -20]);
+
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormStatus('loading');
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      if (res.ok) {
+        setFormStatus('success');
+        setFormData({ name: '', email: '', message: '' });
+        setTimeout(() => setFormStatus('idle'), 5000);
+      } else {
+        setFormStatus('error');
+      }
+    } catch (err) {
+      setFormStatus('error');
+    }
+  };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -365,22 +388,56 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+                <form className="space-y-4" onSubmit={handleContactSubmit}>
                   <div className="space-y-2">
                     <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Your Name</label>
-                    <input type="text" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors" placeholder="Hameed Afsar" />
+                    <input 
+                      required
+                      type="text" 
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors" 
+                      placeholder="Hameed Afsar" 
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Your Email</label>
-                    <input type="email" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors" placeholder="hameed@example.com" />
+                    <input 
+                      required
+                      type="email" 
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors" 
+                      placeholder="hameed@example.com" 
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Message</label>
-                    <textarea rows={4} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors resize-none" placeholder="What's on your mind?" />
+                    <textarea 
+                      required
+                      rows={4} 
+                      value={formData.message}
+                      onChange={(e) => setFormData({ ...formData, message: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 transition-colors resize-none" 
+                      placeholder="What's on your mind?" 
+                    />
                   </div>
-                  <button className="w-full bg-white text-black py-4 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)]">
-                    Send Message
-                  </button>
+                  
+                  {formStatus === 'success' ? (
+                    <div className="w-full bg-green-500/10 border border-green-500/20 py-4 rounded-xl text-green-400 text-center text-[10px] font-black uppercase tracking-widest">
+                      Message Sent Successfully!
+                    </div>
+                  ) : (
+                    <button 
+                      disabled={formStatus === 'loading'}
+                      className="w-full bg-white text-black py-4 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {formStatus === 'loading' ? 'Sending...' : 'Send Message'}
+                    </button>
+                  )}
+                  {formStatus === 'error' && (
+                    <p className="text-red-400 text-[10px] text-center font-bold uppercase tracking-wider">Failed to send. Please try again.</p>
+                  )}
                 </form>
               </div>
 
