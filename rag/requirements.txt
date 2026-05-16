@@ -15,3 +15,4 @@ google-genai
 requests
 pymupdf
 ollama
+ddgs
