@@ -8,7 +8,6 @@ langchain-community
 langchain-google-genai
 langchain-chroma
 langchain-ollama
-sentence-transformers
 pypdf
 google-generativeai
 edge-tts
@@ -16,5 +15,3 @@ google-genai
 requests
 pymupdf
 ollama
-pandas
-openpyxl

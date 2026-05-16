@@ -20,6 +20,7 @@ import requests
 import asyncio
 import io
 import edge_tts
+import gc
 try:
     import ollama
 except ImportError:
@@ -198,7 +199,8 @@ def upload_file(
     if ext != ".pdf":
         if os.path.exists(save_path):
             os.remove(save_path)
-
+    
+    gc.collect() # Force cleanup
     return JSONResponse({
         "session_id": session_id,
         "filename":   file.filename,
@@ -322,6 +324,7 @@ async def ask_question(body: QueryRequest):
             file_path = os.path.join(UPLOAD_DIR, potential_files[0])
             log.info(f"[{body.session_id}] Using Direct Analysis Mode ({body.provider}) for {potential_files[0]}")
             answer = await direct_document_analysis(body.question, file_path, body.apiKey, body.provider, body.model)
+            gc.collect()
             return JSONResponse({"answer": answer})
 
     # ─── Standard RAG Logic (Ollama / ChromaDB) ───────────────────────────
@@ -577,6 +580,7 @@ def analyze_image(body: ImageAnalyzeRequest):
         error_str = str(e)
         log.error(f"Image analysis error: {error_str}")
         # Return error in a field the frontend expects
+        gc.collect()
         return JSONResponse(
             status_code=500,
             content={"error": f"Analysis Error: {error_str}", "detail": error_str}

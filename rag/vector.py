@@ -14,8 +14,8 @@ try:
 except ImportError:
     pass
 
-from typing import Optional
-import pandas as pd
+import gc
+import csv
 try:
     from langchain_chroma import Chroma
 except ImportError:
@@ -71,15 +71,18 @@ def _load_pdf(path: str) -> list[Document]:
 
 
 def _load_csv(path: str) -> list[Document]:
-    df = pd.read_csv(path)
-    text = df.to_string(index=False)
+    text_lines = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            text_lines.append(", ".join(row))
+    text = "\n".join(text_lines)
     return [Document(page_content=text, metadata={"source": os.path.basename(path)})]
 
 
 def _load_xlsx(path: str) -> list[Document]:
-    df = pd.read_excel(path)
-    text = df.to_string(index=False)
-    return [Document(page_content=text, metadata={"source": os.path.basename(path)})]
+    # Placeholder: Removing pandas/openpyxl to save memory on Render Free Tier
+    return [Document(page_content="Excel processing disabled to save memory.", metadata={"source": os.path.basename(path)})]
 
 
 def load_file(path: str) -> list[Document]:
@@ -122,6 +125,7 @@ def ingest_file(path: str, collection_name: str = "rag_store", api_key: Optional
         persist_directory=CHROMA_DIR,
     )
     db.add_documents(chunks)
+    gc.collect() # Force cleanup
     return db
 
 
