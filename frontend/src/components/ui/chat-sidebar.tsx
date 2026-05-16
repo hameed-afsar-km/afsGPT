@@ -62,8 +62,19 @@ export function ChatSidebar() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editValue, setEditValue] = useState("");
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
     const [chatToDelete, setChatToDelete] = useState<string | null>(null);
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+
+    useEffect(() => {
+        const checkMobile = () => {
+            setIsMobile(window.innerWidth < 768);
+            if (window.innerWidth < 768) setIsOpen(false);
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
 
     useEffect(() => {
         if (!user) {
@@ -97,6 +108,7 @@ export function ChatSidebar() {
 
     const handleNewChat = () => {
         setActiveChatId(null);
+        if (isMobile) setIsOpen(false);
     };
 
     const confirmDelete = async () => {
@@ -147,11 +159,20 @@ export function ChatSidebar() {
 
     return (
         <>
+            {/* Mobile Backdrop */}
+            {isMobile && isOpen && (
+                <div 
+                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[40]"
+                    onClick={() => setIsOpen(false)}
+                />
+            )}
+
             <motion.div
                 initial={false}
-                animate={{ width: isOpen ? 260 : 0 }}
+                animate={{ width: isOpen ? (isMobile ? '100%' : 260) : 0 }}
                 className={cn(
-                    "relative flex flex-col backdrop-blur-xl bg-white/[0.02] border-r border-white/5 h-screen overflow-hidden shrink-0",
+                    "flex flex-col backdrop-blur-xl bg-[#0a0a0a]/95 border-r border-white/5 h-screen overflow-hidden shrink-0 shadow-2xl",
+                    isMobile ? "fixed top-0 left-0 z-[50] max-w-[300px]" : "relative z-[40]",
                     !isOpen && "border-none"
                 )}
             >
@@ -162,7 +183,7 @@ export function ChatSidebar() {
                      }} 
                 />
 
-                <div className="flex flex-col h-full w-[260px] relative z-10">
+                <div className="flex flex-col h-full w-full sm:w-[260px] relative z-10 min-w-[260px]">
                     {/* Header */}
                     <div className="flex flex-col p-3 gap-2">
                         <div className="flex items-center justify-between px-2 mb-2">
@@ -256,7 +277,10 @@ export function ChatSidebar() {
                                                         )}
                                                     >
                                                         <button 
-                                                            onClick={() => setActiveChatId(item.id)}
+                                                            onClick={() => {
+                                                                setActiveChatId(item.id);
+                                                                if (isMobile) setIsOpen(false);
+                                                            }}
                                                             className="flex-1 flex items-center gap-3 overflow-hidden"
                                                         >
                                                             <MessageSquare className="w-4 h-4 shrink-0 opacity-40 group-hover:opacity-70" />
@@ -368,7 +392,7 @@ export function ChatSidebar() {
 
             {/* Open Toggle (when closed) */}
             {!isOpen && (
-                <div className="fixed top-4 left-4 z-50 flex items-center gap-3">
+                <div className="fixed top-4 left-4 z-[45] flex items-center gap-3">
                     <button
                         onClick={() => setIsOpen(true)}
                         className="p-2.5 bg-[#0d0d0d] border border-white/10 text-white/60 hover:text-white/90 rounded-xl transition-all shadow-xl backdrop-blur-md"

@@ -1233,7 +1233,7 @@ export function AnimatedAIChat() {
         >
           <div
             className={cn(
-              "w-full max-w-4xl mx-auto px-10 transition-all duration-1000 ease-in-out",
+              "w-full max-w-4xl mx-auto px-4 md:px-10 transition-all duration-1000 ease-in-out",
               isChatMode ? "py-16" : "py-0",
             )}
           >
@@ -1249,7 +1249,7 @@ export function AnimatedAIChat() {
                 >
                   <div className="text-center space-y-3">
                     <motion.h1
-                      className="text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white/90 to-white/40"
+                      className="text-4xl md:text-5xl font-medium tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white/90 to-white/40 px-2"
                       layoutId="main-title"
                     >
                       How can I help today?
@@ -1330,15 +1330,15 @@ export function AnimatedAIChat() {
                           msg.role === "user"
                             ? editingMessageIndex === idx
                               ? "items-stretch"
-                              : "items-end ml-16"
+                              : "items-end ml-4 md:ml-16"
                             : editingMessageIndex === idx
                             ? "items-stretch"
-                            : "items-start mr-16",
+                            : "items-start mr-4 md:mr-16",
                         )}
                       >
                         <div
                           className={cn(
-                            "w-full rounded-[1.8rem] px-6 py-4 text-sm leading-relaxed backdrop-blur-xl border transition-all duration-500",
+                            "w-full rounded-[1.5rem] md:rounded-[1.8rem] px-5 py-4 text-sm leading-relaxed backdrop-blur-xl border transition-all duration-500",
                             editingMessageIndex === idx
                               ? "bg-white/[0.05] border-white/[0.12] shadow-2xl"
                               : msg.role === "user"
@@ -1719,7 +1719,7 @@ export function AnimatedAIChat() {
         {/* Sticky Input Field in Chat Mode */}
         {isChatMode && (
           <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none bg-gradient-to-t from-black via-black/80 to-transparent pt-16 pb-2">
-            <div className="max-w-4xl mx-auto px-6 pb-6">
+            <div className="max-w-4xl mx-auto px-4 md:px-6 pb-4 md:pb-6">
               <motion.div
                 layoutId="input-box"
                 className="pointer-events-auto backdrop-blur-xl bg-white/[0.05] rounded-[1.5rem] border border-white/[0.08]"
@@ -1736,12 +1736,11 @@ export function AnimatedAIChat() {
       </>
     )} {/* end IMAGES ternary */}
 
-        {/* Command Palette Overlay */}
         <AnimatePresence>
           {showCommandPalette && (
             <motion.div
               ref={commandPaletteRef}
-              className="fixed left-1/2 -translate-x-1/2 bottom-[140px] w-full max-w-lg backdrop-blur-xl bg-[#0A0A0B]/90 rounded-3xl z-50 border border-white/10 overflow-hidden p-3 command-palette-container"
+              className="fixed left-1/2 -translate-x-1/2 bottom-[140px] w-[95%] md:w-full max-w-lg backdrop-blur-xl bg-[#0A0A0B]/90 rounded-3xl z-50 border border-white/10 overflow-hidden p-3 command-palette-container"
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
@@ -2026,8 +2025,8 @@ export function AnimatedAIChat() {
           />
         </div>
 
-        <div className="px-5 pb-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="px-3 md:px-5 pb-3 md:pb-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 md:gap-4 mt-2">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3 w-full sm:w-auto">
             {/* Attachments Dropdown */}
             <div className="relative attach-menu-container">
               <motion.button
