@@ -18,6 +18,8 @@ import logging
 import re
 import requests
 import asyncio
+import io
+import edge_tts
 try:
     import ollama
 except ImportError:
@@ -812,4 +814,9 @@ async def text_to_speech(body: Dict[str, str]):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)
+    # Render provides a PORT environment variable. Default to 8001 for local development.
+    port = int(os.environ.get("PORT", 8001))
+    # Disable reload in production (Render) for better performance and stability.
+    is_dev = os.environ.get("RENDER") is None
+    log.info(f"Starting server on port {port} (dev_mode={is_dev})")
+    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=is_dev)
