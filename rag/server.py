@@ -11,6 +11,9 @@ Endpoints:
 
 import os
 import sys
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env")) # Load from root
+load_dotenv() # Fallback to local .env
 import uuid
 import shutil
 import base64

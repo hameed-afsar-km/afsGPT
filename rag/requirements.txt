@@ -16,3 +16,4 @@ requests
 pymupdf
 ollama
 ddgs
+python-dotenv
