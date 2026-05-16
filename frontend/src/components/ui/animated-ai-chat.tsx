@@ -758,6 +758,11 @@ export function AnimatedAIChat() {
     const newAttached: Array<{ name: string; thumbnail?: string }> = [];
     setIsUploading(true);
 
+    // Get API keys from local storage to enable Cloud Direct Analysis on Render
+    const provider = localStorage.getItem("afs-provider") || "gemini";
+    const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
+    const apiKey = keys[provider] || "";
+
     for (const file of files) {
       const allowed = [".pdf", ".txt", ".csv", ".xlsx", ".xls"];
       const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
@@ -777,6 +782,9 @@ export function AnimatedAIChat() {
         form.append("file", file);
         if (currentSessionId) {
           form.append("session_id", currentSessionId);
+        }
+        if (apiKey) {
+          form.append("apiKey", apiKey);
         }
 
         const res = await fetch("/api/rag/upload", {
@@ -800,7 +808,7 @@ export function AnimatedAIChat() {
       } catch (err: any) {
         const errMsg: any = {
           role: "assistant",
-          content: `❌ Could not reach the RAG server. Make sure it's running on port 8001.`,
+          content: `❌ Could not reach the RAG server. If you are using Render, please ensure your backend is awake and you have provided a valid API key in settings to enable Cloud Mode.`,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errMsg]);
