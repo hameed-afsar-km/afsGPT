@@ -242,7 +242,7 @@ export default function LandingPage() {
                   className="relative w-full justify-center px-8 sm:px-12 py-4 sm:py-5 bg-white overflow-hidden cursor-pointer group rounded-sm shadow-2xl flex items-center gap-3"
                 >
                   <motion.div
-                    className="absolute inset-0 bg-[#581C87]"
+                    className="absolute inset-0 bg-gradient-to-tr from-purple-700 via-purple-600 to-pink-600"
                     variants={{
                       rest: { top: "100%" },
                       hover: { top: "0%" }
@@ -252,7 +252,7 @@ export default function LandingPage() {
 
                   <motion.span
                     variants={{
-                      rest: { color: "#581C87" },
+                      rest: { color: "#7c3aed" },
                       hover: { color: "#FFFFFF" }
                     }}
                     className="relative z-10 font-black text-sm uppercase tracking-[0.2em] transition-colors duration-200"
@@ -262,7 +262,7 @@ export default function LandingPage() {
 
                   <motion.div
                     variants={{
-                      rest: { color: "#581C87", x: 0 },
+                      rest: { color: "#7c3aed", x: 0 },
                       hover: { color: "#FFFFFF", x: 4 }
                     }}
                     className="relative z-10 transition-colors duration-200"
@@ -272,12 +272,31 @@ export default function LandingPage() {
                 </motion.div>
               </Link>
 
-              <button
+              <motion.div 
                 onClick={() => setIsContactOpen(true)}
-                className="w-full sm:w-auto px-8 sm:px-10 py-4 sm:py-5 bg-transparent border border-white/10 text-white/40 font-black text-sm uppercase tracking-[0.2em] rounded-sm hover:bg-white/5 hover:text-white transition-all text-center"
+                initial="rest"
+                whileHover="hover"
+                animate="rest"
+                className="relative w-full sm:w-auto justify-center px-8 sm:px-10 py-4 sm:py-5 bg-transparent border border-white/10 overflow-hidden cursor-pointer group rounded-sm flex items-center gap-3 transition-colors"
               >
-                Contact Developer
-              </button>
+                <motion.div 
+                  className="absolute inset-0 bg-gradient-to-tr from-white to-white/90"
+                  variants={{
+                    rest: { top: "100%" },
+                    hover: { top: "0%" }
+                  }}
+                  transition={{ duration: 0.3, ease: "easeInOut" }}
+                />
+                <motion.span 
+                  variants={{
+                    rest: { color: "rgba(255,255,255,0.4)" },
+                    hover: { color: "#000000" }
+                  }}
+                  className="relative z-10 font-black text-sm uppercase tracking-[0.2em] transition-colors duration-200"
+                >
+                  Contact Developer
+                </motion.span>
+              </motion.div>
             </motion.div>
           </motion.div>
         </div>
