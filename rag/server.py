@@ -30,7 +30,7 @@ except ImportError:
     ollama = None
 import google.generativeai as genai
 from typing import List, Optional, Dict
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, Request
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -87,6 +87,24 @@ for d in [UPLOAD_DIR, STATIC_DIR, IMAGES_DIR, THUMBNAILS_DIR]:
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
+
+def resolve_api_key(provider: str, user_key: Optional[str]) -> Optional[str]:
+    provider = provider.lower()
+    if user_key:
+        return user_key
+    
+    # Suffix check
+    env_name = f"{provider.upper()}_API_KEY"
+    env_key = os.environ.get(env_name)
+    if env_key:
+        return env_key
+        
+    if provider == "gemini":
+        gemini_key = os.environ.get("GOOGLE_API_KEY")
+        if gemini_key:
+            return gemini_key
+
+    return None
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -357,13 +375,15 @@ async def ask_question(body: QueryRequest):
     log.info(f"[{body.session_id}] Question: {body.question}")
     
     # ─── New Direct Document Logic (Bypass DB for PDFs on Render) ───────────
-    if body.apiKey and body.session_id:
+    provider = body.provider.lower() if body.provider else "gemini"
+    api_key = resolve_api_key(provider, body.apiKey)
+    if api_key and body.session_id:
         # Find the uploaded file for this session
         potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id) and f.lower().endswith(".pdf")]
         if potential_files:
             file_path = os.path.join(UPLOAD_DIR, potential_files[0])
             log.info(f"[{body.session_id}] Using Direct Analysis Mode ({body.provider}) for {potential_files[0]}")
-            answer = await direct_document_analysis(body.question, file_path, body.apiKey, body.provider, body.model)
+            answer = await direct_document_analysis(body.question, file_path, api_key, body.provider, body.model)
             gc.collect()
             return JSONResponse({"answer": answer})
 
@@ -371,8 +391,8 @@ async def ask_question(body: QueryRequest):
     try:
         # Lazy import
         from rag_chain import query
-        # Pass apiKey to the RAG chain logic
-        answer = query(question=body.question, collection_name=body.session_id, api_key=body.apiKey)
+        # Pass resolved api_key to the RAG chain logic
+        answer = query(question=body.question, collection_name=body.session_id, api_key=api_key)
         log.info(f"[{body.session_id}] Answer generated.")
     except Exception as e:
         log.error(f"[{body.session_id}] Query error: {e}")
@@ -446,8 +466,8 @@ def analyze_image(body: ImageAnalyzeRequest):
         clean_base64 = data if data else body.image_base64
 
         # ─── Strict Provider & Model Adherence ───────────────────────
-        api_key = body.apiKey
         selected_provider = body.provider.lower() if body.provider else "gemini"
+        api_key = resolve_api_key(selected_provider, body.apiKey)
         
         errors = []
 
@@ -695,8 +715,7 @@ async def chat_handler(body: ChatRequest):
     """Unified chat endpoint that uses backend keys or user-provided keys."""
     provider = body.provider.lower()
     model = body.model
-    # Priority: 1. Request Body Key, 2. Backend Environment Variable
-    api_key = body.apiKey or os.environ.get(f"{provider.upper()}_API_KEY")
+    api_key = resolve_api_key(provider, body.apiKey)
 
     SYSTEM_PROMPT = (
         "You are Afs AI, a high-end AI assistant. Always format your responses beautifully using Markdown. "
@@ -841,7 +860,7 @@ async def chat_handler(body: ChatRequest):
 async def get_provider_models(body: ModelsRequest):
     """Fetch available models for a provider, using backend keys if needed."""
     provider = body.provider.lower()
-    api_key = body.apiKey or os.environ.get(f"{provider.upper()}_API_KEY")
+    api_key = resolve_api_key(provider, body.apiKey)
 
     if provider == "ollama":
         try:
@@ -934,31 +953,44 @@ def clean_text_for_tts(text: str) -> str:
     # Clean up whitespace
     return " ".join(text.split()).strip()
 
-@app.post("/tts")
-async def text_to_speech(body: Dict[str, str]):
+@app.api_route("/tts", methods=["GET", "POST"])
+async def text_to_speech(
+    request: Request,
+    text: Optional[str] = None,
+    voice: Optional[str] = "en-US-AvaNeural"
+):
     """Convert text to speech using edge-tts and stream it back."""
-    text = body.get("text", "")
-    voice = body.get("voice", "en-US-AvaNeural")
-    
-    if not text:
+    input_text = text
+    input_voice = voice
+
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            input_text = body.get("text", input_text)
+            input_voice = body.get("voice", input_voice)
+        except:
+            pass
+
+    if not input_text:
         raise HTTPException(status_code=400, detail="Text is required")
 
-    cleaned = clean_text_for_tts(text)
+    cleaned = clean_text_for_tts(input_text)
     if not cleaned:
         from fastapi import Response
         return Response(status_code=204)
     
     try:
-        communicate = edge_tts.Communicate(cleaned, voice)
+        communicate = edge_tts.Communicate(cleaned, input_voice or "en-US-AvaNeural")
         
-        # Stream the audio directly from memory
-        audio_data = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_data.write(chunk["data"])
-        
-        audio_data.seek(0)
-        return StreamingResponse(audio_data, media_type="audio/mpeg")
+        async def audio_generator():
+            try:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        yield chunk["data"]
+            except Exception as e:
+                log.error(f"Streaming error during TTS: {e}")
+                
+        return StreamingResponse(audio_generator(), media_type="audio/mpeg")
         
     except Exception as e:
         log.error(f"TTS error: {e}")

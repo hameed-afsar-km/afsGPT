@@ -435,10 +435,13 @@ export function AnimatedAIChat() {
 
       let nextIndexToFetch = 0;
 
-      const fetchNext = async (i: number) => {
+      const backendWsUrl = process.env.NEXT_PUBLIC_WS_URL ?? "http://localhost:8001";
+      const BACKEND_URL = backendWsUrl.replace(/^ws/, "http");
+
+      const fetchNext = async (i: number): Promise<HTMLAudioElement | null> => {
         if (i >= cleanedSentences.length || controller.signal.aborted) return null;
         try {
-          const res = await fetch("/api/tts", {
+          const res = await fetch(`${BACKEND_URL}/tts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: cleanedSentences[i] }),
@@ -447,7 +450,11 @@ export function AnimatedAIChat() {
           if (res.ok && res.status !== 204) {
             const blob = await res.blob();
             if (blob.size > 0) {
-              return URL.createObjectURL(blob);
+              const url = URL.createObjectURL(blob);
+              const audio = new Audio(url);
+              audio.preload = "auto";
+              audio.load(); // Force pre-decoding and buffering
+              return audio;
             }
           }
         } catch (e) {
@@ -456,16 +463,35 @@ export function AnimatedAIChat() {
         return null;
       };
 
-      let currentUrl = await fetchNext(0);
-      nextIndexToFetch = 1;
+      // Pre-fetch storage
+      const activePromises: { [key: number]: Promise<HTMLAudioElement | null> } = {};
+      const getUrl = (i: number) => {
+        if (!activePromises[i]) {
+          activePromises[i] = fetchNext(i);
+        }
+        return activePromises[i];
+      };
 
-      while (currentUrl && !controller.signal.aborted) {
-        const audio = new Audio(currentUrl);
+      // Trigger pre-fetch for first 2 chunks
+      getUrl(0);
+      if (cleanedSentences.length > 1) {
+        getUrl(1);
+      }
+
+      for (let i = 0; i < cleanedSentences.length; i++) {
+        if (controller.signal.aborted) break;
+
+        // Pre-fetch up to 2 chunks ahead concurrently
+        for (let j = 1; j <= 2; j++) {
+          if (i + j < cleanedSentences.length) {
+            getUrl(i + j);
+          }
+        }
+
+        const audio = await getUrl(i);
+        if (!audio) continue;
+
         currentAudioRef.current = audio;
-
-        // Pre-fetch next chunk while current one plays
-        const nextUrlPromise = fetchNext(nextIndexToFetch);
-        nextIndexToFetch++;
 
         await new Promise<void>((resolve) => {
           audio.onended = () => resolve();
@@ -477,11 +503,9 @@ export function AnimatedAIChat() {
           audio.play().catch(() => resolve());
         });
 
-        URL.revokeObjectURL(currentUrl);
-
-        if (controller.signal.aborted) break;
-
-        currentUrl = await nextUrlPromise;
+        if (audio.src) {
+          URL.revokeObjectURL(audio.src);
+        }
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {

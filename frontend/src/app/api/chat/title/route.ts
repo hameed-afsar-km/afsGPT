@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
+
 export async function POST(req: NextRequest) {
     try {
         let { message, provider, model, apiKey } = await req.json();
@@ -19,133 +21,28 @@ export async function POST(req: NextRequest) {
             { role: "user", content: message }
         ];
 
-        // Handle different providers
-        if (provider === "ollama") {
-            try {
-                const response = await fetch("http://localhost:11434/api/chat", {
-                    method: "POST",
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages,
-                        stream: false
-                    })
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    return NextResponse.json({ title: data.message.content.trim() });
-                }
-                return NextResponse.json({ error: "Ollama chat failed" }, { status: 500 });
-            } catch (err) {
-                return NextResponse.json({ error: "Could not connect to Ollama" }, { status: 500 });
-            }
+        // Call Python FastAPI backend `/chat` which has access to backend API keys and supports overrides
+        const response = await fetch(`${RAG_SERVER}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                messages: messages,
+                provider: provider,
+                model: model,
+                apiKey: apiKey || ""
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            return NextResponse.json({ title: data.content.trim() });
         }
 
-        if (provider === "openai") {
-            if (!apiKey) return NextResponse.json({ error: "API Key required" }, { status: 400 });
-            try {
-                const response = await fetch("https://api.openai.com/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages
-                    })
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    return NextResponse.json({ title: data.choices[0].message.content.trim() });
-                }
-                const errorData = await response.json();
-                return NextResponse.json({ error: errorData.error?.message || "OpenAI chat failed" }, { status: response.status });
-            } catch (err) {
-                return NextResponse.json({ error: "OpenAI connection failed" }, { status: 500 });
-            }
-        }
+        const errorData = await response.json().catch(() => ({ detail: "Failed to generate title from backend" }));
+        return NextResponse.json({ error: errorData.detail || "Failed to generate title" }, { status: response.status });
 
-        if (provider === "gemini") {
-            if (!apiKey) return NextResponse.json({ error: "Gemini API Key required" }, { status: 400 });
-            try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        systemInstruction: { parts: [{ text: systemPrompt }] },
-                        contents: [{ role: "user", parts: [{ text: message }] }]
-                    })
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    return NextResponse.json({ title: data.candidates[0].content.parts[0].text.trim() });
-                }
-                const errorData = await response.json();
-                return NextResponse.json({ error: errorData.error?.message || "Gemini chat failed" }, { status: response.status });
-            } catch (err) {
-                return NextResponse.json({ error: "Gemini connection failed" }, { status: 500 });
-            }
-        }
-
-        if (provider === "anthropic") {
-            if (!apiKey) return NextResponse.json({ error: "Anthropic API Key required" }, { status: 400 });
-            try {
-                const response = await fetch("https://api.anthropic.com/v1/messages", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "x-api-key": apiKey,
-                        "anthropic-version": "2023-06-01"
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        max_tokens: 20,
-                        system: systemPrompt,
-                        messages: [{ role: "user", content: message }]
-                    })
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    return NextResponse.json({ title: data.content[0].text.trim() });
-                }
-                const errorData = await response.json();
-                return NextResponse.json({ error: errorData.error?.message || "Anthropic chat failed" }, { status: response.status });
-            } catch (err) {
-                return NextResponse.json({ error: "Anthropic connection failed" }, { status: 500 });
-            }
-        }
-        if (provider === "openrouter") {
-            if (!apiKey) return NextResponse.json({ error: "OpenRouter API Key required" }, { status: 400 });
-            try {
-                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${apiKey}`,
-                        "HTTP-Referer": "http://localhost:3000",
-                        "X-Title": "AfsGPT"
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: messages,
-                        max_tokens: 20
-                    })
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    return NextResponse.json({ title: data.choices[0].message.content.trim() });
-                }
-                const errorData = await response.json();
-                return NextResponse.json({ error: errorData.error?.message || "OpenRouter chat failed" }, { status: response.status });
-            } catch (err) {
-                return NextResponse.json({ error: "OpenRouter connection failed" }, { status: 500 });
-            }
-        }
-
-        return NextResponse.json({ error: "Unsupported provider" }, { status: 400 });
-
-    } catch (error) {
-        console.error("Title API error:", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    } catch (error: any) {
+        console.error("Title API proxy error:", error);
+        return NextResponse.json({ error: "Failed to connect to backend" }, { status: 500 });
     }
 }
