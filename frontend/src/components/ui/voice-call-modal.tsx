@@ -361,7 +361,11 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                         break;
 
                     case "llm_token":
+                        if (aiTokensRef.current === "") {
+                            setPartialText("");
+                        }
                         aiTokensRef.current += msg.token;
+                        setPartialText(aiTokensRef.current);
                         break;
 
                     case "audio_end": {
@@ -445,6 +449,9 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                     // Speech detected
                     isSpeakingRef.current = true;
                     silenceFramesRef.current = 0;
+                    if (speechFramesRef.current === 0) {
+                        setPartialText("");
+                    }
                     speechFramesRef.current++;
 
                     // Interruption check: consecutive speech for ~120ms (3 frames) while AI is thinking or speaking
@@ -643,7 +650,12 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                             <motion.p
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                className="text-xs text-white/40 max-w-xs text-center px-4 leading-relaxed"
+                                className={cn(
+                                    "max-w-md text-center px-6 leading-relaxed transition-all duration-300",
+                                    phase === "speaking"
+                                        ? "text-sm text-white/90 font-medium"
+                                        : "text-xs text-white/40"
+                                )}
                             >
                                 {partialText}
                             </motion.p>
