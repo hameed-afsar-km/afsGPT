@@ -214,8 +214,38 @@ async def stream_llm(
 
     else:
         # Ollama (local)
-        async for token in _stream_ollama(model or "gemma2:2b", messages):
-            yield token
+        import httpx
+        ollama_running = False
+        try:
+            async with httpx.AsyncClient(timeout=1) as client:
+                res = await client.get("http://localhost:11434/api/tags")
+                if res.status_code == 200:
+                    ollama_running = True
+        except Exception:
+            pass
+
+        if ollama_running:
+            async for token in _stream_ollama(model or "gemma2:2b", messages):
+                yield token
+        else:
+            fallback_key = os.environ.get("OPENROUTER_API_KEY")
+            if fallback_key:
+                async for token in _stream_openai_compatible(
+                    url="https://openrouter.ai/api/v1/chat/completions",
+                    model="google/gemini-2.5-flash",
+                    messages=messages,
+                    api_key=fallback_key,
+                    extra_headers={
+                        "HTTP-Referer": "http://localhost:3000",
+                        "X-Title": "AfsGPT",
+                    },
+                ):
+                    yield token
+            elif os.environ.get("GOOGLE_API_KEY"):
+                async for token in _stream_gemini(os.environ.get("GOOGLE_API_KEY"), "gemini-2.5-flash", messages):
+                    yield token
+            else:
+                yield "[Ollama is not running, and no cloud fallback is configured]"
 
 
 async def _stream_openai_compatible(
@@ -355,21 +385,24 @@ async def _stream_ollama(model: str, messages: List[dict]) -> AsyncGenerator[str
     import httpx
 
     payload = {"model": model, "messages": messages, "stream": True}
-    async with httpx.AsyncClient(timeout=60) as client:
-        async with client.stream("POST", "http://localhost:11434/api/chat", json=payload) as resp:
-            if resp.status_code != 200:
-                yield "[Ollama unavailable]"
-                return
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                    text = chunk.get("message", {}).get("content", "")
-                    if text:
-                        yield text
-                except json.JSONDecodeError:
-                    pass
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            async with client.stream("POST", "http://localhost:11434/api/chat", json=payload) as resp:
+                if resp.status_code != 200:
+                    yield "[Ollama unavailable]"
+                    return
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        text = chunk.get("message", {}).get("content", "")
+                        if text:
+                            yield text
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+    except Exception:
+        yield "[Ollama unavailable]"
 
 
 # ─── TTS Helper ───────────────────────────────────────────────────────────────
