@@ -141,6 +141,35 @@ function computeRMS(buf: Float32Array): number {
     return Math.sqrt(sum / buf.length);
 }
 
+/** Play a natural, organic acoustic chime when the user interrupts the AI. */
+function playInterruptEffect(ctx: AudioContext) {
+    try {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        osc1.type = "sine";
+        osc2.type = "sine";
+        // Gentle acoustic frequencies
+        osc1.frequency.setValueAtTime(280, ctx.currentTime);
+        osc2.frequency.setValueAtTime(140, ctx.currentTime);
+
+        gainNode.gain.setValueAtTime(0.06, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.15);
+
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        osc1.start();
+        osc2.start();
+        osc1.stop(ctx.currentTime + 0.15);
+        osc2.stop(ctx.currentTime + 0.15);
+    } catch (e) {
+        console.warn("[Voice] Interrupt effect failed:", e);
+    }
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SILENCE_RMS_THRESHOLD = 0.015; // normalized 0-1
 const SILENCE_FRAMES_NEEDED = 12;    // ~240ms at 50ms chunks
@@ -351,6 +380,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                                     }
                                 }
                                 aiTokensRef.current = "";
+                                setPhaseAndAnalyser("listening", micAnalyserRef.current);
                             } else {
                                 setTimeout(waitForPlayback, 100);
                             }
@@ -416,6 +446,20 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                     isSpeakingRef.current = true;
                     silenceFramesRef.current = 0;
                     speechFramesRef.current++;
+
+                    // Interruption check: consecutive speech for ~120ms (3 frames) while AI is thinking or speaking
+                    if (
+                        speechFramesRef.current >= 3 &&
+                        (phaseRef.current === "speaking" || phaseRef.current === "thinking")
+                    ) {
+                        console.info("[Voice] User interrupted AI. Resetting playback/state.");
+                        stopAllAudio();
+                        ws.send(JSON.stringify({ type: "cancel" }));
+                        playInterruptEffect(ctx);
+                        setPartialText("");
+                        aiTokensRef.current = "";
+                        setPhaseAndAnalyser("listening", micAnalyserRef.current);
+                    }
                 } else {
                     if (isSpeakingRef.current) {
                         silenceFramesRef.current++;
@@ -425,6 +469,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                             silenceFramesRef.current = 0;
                             speechFramesRef.current = 0;
                             ws.send(JSON.stringify({ type: "end_of_speech" }));
+                            setPhaseAndAnalyser("thinking", null);
                             return;
                         }
                     }
