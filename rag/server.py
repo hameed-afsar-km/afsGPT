@@ -30,7 +30,7 @@ except ImportError:
     ollama = None
 import google.generativeai as genai
 from typing import List, Optional, Dict
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -64,7 +64,13 @@ app = FastAPI(title="AfsGPT RAG API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "https://*.vercel.app",
+        "https://*.onrender.com",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -726,9 +732,19 @@ async def chat_handler(body: ChatRequest):
                     raise HTTPException(status_code=503, detail="Ollama is not running and no cloud fallback (GOOGLE_API_KEY) is configured.")
 
         if provider == "openai":
-            if response.ok:
-                return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
-            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenAI failed"))
+            if not api_key: raise HTTPException(status_code=400, detail="OpenAI API Key missing")
+            try:
+                response = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": messages},
+                    timeout=60
+                )
+                if response.ok:
+                    return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
+                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenAI failed"))
+            except Exception as e:
+                log.warning(f"OpenAI failed: {e}")
 
         if provider == "gemini":
             if not api_key: raise HTTPException(status_code=400, detail="Gemini API Key missing")
@@ -749,20 +765,38 @@ async def chat_handler(body: ChatRequest):
         if provider == "anthropic":
             if not api_key: raise HTTPException(status_code=400, detail="Anthropic API Key missing")
             try:
-                if not api_key: raise Exception("Gemini API Key missing")
-                genai.configure(api_key=api_key)
-                # Ensure correct model name format
-                clean_model = model if "models/" in model else f"models/{model}"
-                gemini_model = genai.GenerativeModel(model_name=model)
-                response = gemini_model.generate_content(
-                    [m["content"] for m in messages],
-                    generation_config={"temperature": 0.3}
+                system_text = ""
+                anthropic_messages = []
+                for m in messages:
+                    if m["role"] == "system":
+                        system_text = m["content"]
+                    else:
+                        role = "assistant" if m["role"] == "assistant" else "user"
+                        anthropic_messages.append({"role": role, "content": m["content"]})
+                
+                payload = {
+                    "model": model,
+                    "max_tokens": 1024,
+                    "messages": anthropic_messages
+                }
+                if system_text:
+                    payload["system"] = system_text
+
+                response = requests.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json=payload,
+                    timeout=60
                 )
-                if response.text:
-                    return JSONResponse({"content": response.text})
-                raise Exception("Gemini returned empty response")
+                if response.ok:
+                    return JSONResponse({"content": response.json()["content"][0]["text"]})
+                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Anthropic failed"))
             except Exception as e:
-                log.warning(f"Gemini failed, checking for Ollama fallback: {e}")
+                log.warning(f"Anthropic failed: {e}")
 
         if provider == "openrouter":
             if not api_key: raise HTTPException(status_code=400, detail="OpenRouter API Key missing")
@@ -864,6 +898,17 @@ async def get_provider_models(body: ModelsRequest):
     return JSONResponse({"models": []})
 
 
+# ─── Streaming Voice WebSocket ────────────────────────────────────────────────
+
+@app.websocket("/ws/voice")
+async def voice_ws(websocket: WebSocket):
+    """
+    Low-latency streaming voice pipeline:
+    Audio chunks → faster-whisper STT → streaming LLM → sentence chunker → edge-tts → audio chunks
+    """
+    from voice_ws import voice_websocket_handler
+    await voice_websocket_handler(websocket)
+
 
 # ─── Static frontend ──────────────────────────────────────────────────────────
 
@@ -899,10 +944,9 @@ async def text_to_speech(body: Dict[str, str]):
         raise HTTPException(status_code=400, detail="Text is required")
 
     cleaned = clean_text_for_tts(text)
-    
     if not cleaned:
-        # If everything was emojis, just return a small silent or generic response
-        cleaned = "I am processing your request."
+        from fastapi import Response
+        return Response(status_code=204)
     
     try:
         communicate = edge_tts.Communicate(cleaned, voice)

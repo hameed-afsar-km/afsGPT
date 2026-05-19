@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
             } catch (err) {
                 return NextResponse.json({ error: "Anthropic connection failed" }, { status: 500 });
             }
+        }
         if (provider === "openrouter") {
             if (!apiKey) return NextResponse.json({ error: "OpenRouter API Key required" }, { status: 400 });
             try {

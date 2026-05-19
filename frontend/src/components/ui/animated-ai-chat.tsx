@@ -17,6 +17,7 @@ import {
   Mic,
   MicOff,
   Volume2,
+  VolumeX,
   FileText,
   X,
   Copy,
@@ -171,6 +172,9 @@ export function AnimatedAIChat() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [recentCommand, setRecentCommand] = useState<string | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [playingMsgIndex, setPlayingMsgIndex] = useState<number | null>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioAbortControllerRef = useRef<AbortController | null>(null);
 
   const {
     activeChatId,
@@ -399,23 +403,92 @@ export function AnimatedAIChat() {
     }
   };
 
-  const playTTS = async (text: string) => {
+  const stopTTS = () => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    if (audioAbortControllerRef.current) {
+      audioAbortControllerRef.current.abort();
+      audioAbortControllerRef.current = null;
+    }
+    setPlayingMsgIndex(null);
+  };
+
+  const playTTS = async (text: string, index: number) => {
+    if (playingMsgIndex === index) {
+      stopTTS();
+      return;
+    }
+    stopTTS();
+
+    setPlayingMsgIndex(index);
+    const controller = new AbortController();
+    audioAbortControllerRef.current = controller;
+
     try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text }),
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.play();
+      // Split by punctuation, keeping punctuation with the sentence
+      const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
+      const cleanedSentences = sentences.map(s => s.trim()).filter(s => s.length > 0);
+
+      if (cleanedSentences.length === 0) return;
+
+      let nextIndexToFetch = 0;
+
+      const fetchNext = async (i: number) => {
+        if (i >= cleanedSentences.length || controller.signal.aborted) return null;
+        try {
+          const res = await fetch("/api/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: cleanedSentences[i] }),
+            signal: controller.signal
+          });
+          if (res.ok && res.status !== 204) {
+            const blob = await res.blob();
+            if (blob.size > 0) {
+              return URL.createObjectURL(blob);
+            }
+          }
+        } catch (e) {
+          // ignore aborts
+        }
+        return null;
+      };
+
+      let currentUrl = await fetchNext(0);
+      nextIndexToFetch = 1;
+
+      while (currentUrl && !controller.signal.aborted) {
+        const audio = new Audio(currentUrl);
+        currentAudioRef.current = audio;
+
+        // Pre-fetch next chunk while current one plays
+        const nextUrlPromise = fetchNext(nextIndexToFetch);
+        nextIndexToFetch++;
+
+        await new Promise<void>((resolve) => {
+          audio.onended = () => resolve();
+          audio.onerror = () => resolve();
+          controller.signal.addEventListener('abort', () => {
+            audio.pause();
+            resolve();
+          });
+          audio.play().catch(() => resolve());
+        });
+
+        URL.revokeObjectURL(currentUrl);
+
+        if (controller.signal.aborted) break;
+
+        currentUrl = await nextUrlPromise;
       }
-    } catch (error) {
-      console.error("TTS playback error:", error);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error("TTS playback error:", error);
+      }
+    } finally {
+      setPlayingMsgIndex((prev) => prev === index ? null : prev);
     }
   };
 
@@ -1617,11 +1690,20 @@ export function AnimatedAIChat() {
                         <div className="mt-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 px-2">
                           {msg.role === "assistant" && (
                             <button
-                              onClick={() => playTTS(msg.content)}
-                              className="p-1.5 rounded-full hover:bg-white/10 text-white/30 hover:text-white/70 transition-colors"
-                              title="Read aloud"
+                              onClick={() => playTTS(msg.content, idx)}
+                              className={cn(
+                                "p-1.5 rounded-full transition-colors",
+                                playingMsgIndex === idx
+                                  ? "bg-violet-500/20 text-violet-400 hover:bg-violet-500/30"
+                                  : "hover:bg-white/10 text-white/30 hover:text-white/70"
+                              )}
+                              title={playingMsgIndex === idx ? "Stop reading" : "Read aloud"}
                             >
-                              <Volume2 className="w-3.5 h-3.5" />
+                              {playingMsgIndex === idx ? (
+                                <Square className="w-3.5 h-3.5 fill-current" />
+                              ) : (
+                                <Volume2 className="w-3.5 h-3.5" />
+                              )}
                             </button>
                           )}
                           {msg.role === "user" && editingMessageIndex !== idx && (

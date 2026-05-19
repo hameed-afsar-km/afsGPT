@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 pydantic
 chromadb
@@ -17,3 +17,7 @@ pymupdf
 ollama
 ddgs
 python-dotenv
+faster-whisper
+httpx
+numpy
+websockets
