@@ -113,6 +113,32 @@ export async function POST(req: NextRequest) {
             } catch (err) {
                 return NextResponse.json({ error: "Anthropic connection failed" }, { status: 500 });
             }
+        if (provider === "openrouter") {
+            if (!apiKey) return NextResponse.json({ error: "OpenRouter API Key required" }, { status: 400 });
+            try {
+                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${apiKey}`,
+                        "HTTP-Referer": "http://localhost:3000",
+                        "X-Title": "AfsGPT"
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        max_tokens: 20
+                    })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    return NextResponse.json({ title: data.choices[0].message.content.trim() });
+                }
+                const errorData = await response.json();
+                return NextResponse.json({ error: errorData.error?.message || "OpenRouter chat failed" }, { status: response.status });
+            } catch (err) {
+                return NextResponse.json({ error: "OpenRouter connection failed" }, { status: 500 });
+            }
         }
 
         return NextResponse.json({ error: "Unsupported provider" }, { status: 400 });

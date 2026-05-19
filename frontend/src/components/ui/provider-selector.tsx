@@ -32,6 +32,7 @@ const providers: Provider[] = [
     { id: "openai", name: "OpenAI", icon: <Zap className="w-4 h-4" />, color: "text-emerald-400" },
     { id: "gemini", name: "Gemini", icon: <Sparkles className="w-4 h-4" />, color: "text-blue-400" },
     { id: "anthropic", name: "Anthropic", icon: <Brain className="w-4 h-4" />, color: "text-orange-400" },
+    { id: "openrouter", name: "OpenRouter", icon: <RefreshCcw className="w-4 h-4" />, color: "text-rose-400" },
     { id: "ollama", name: "Ollama", icon: <Cpu className="w-4 h-4" />, color: "text-violet-400" },
 ];
 

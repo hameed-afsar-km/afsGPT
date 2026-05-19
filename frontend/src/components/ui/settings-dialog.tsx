@@ -23,7 +23,8 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     const [apiKeys, setApiKeys] = useState<{ [key: string]: string }>({
         openai: "",
         gemini: "",
-        anthropic: ""
+        anthropic: "",
+        openrouter: ""
     });
     const [saveStatus, setSaveStatus] = useState<string | null>(null);
     const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false);
@@ -191,12 +192,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                                             )}
                                         </div>
                                         <div className="space-y-5">
-                                            {["openai", "gemini", "anthropic"].map((provider) => (
+                                            {["openai", "gemini", "anthropic", "openrouter"].map((provider) => (
                                                 <div key={provider} className="space-y-2">
                                                     <label className="text-xs font-medium text-white/60 capitalize">
                                                         {provider === "openai" ? "OpenAI API Key" : 
                                                          provider === "gemini" ? "Google Gemini API Key" : 
-                                                         "Anthropic API Key"}
+                                                         provider === "anthropic" ? "Anthropic API Key" :
+                                                         "OpenRouter API Key"}
                                                     </label>
                                                     <div className="relative group">
                                                         <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-violet-400 transition-colors" />

@@ -67,6 +67,16 @@ def get_llm(provider: str, model: str, api_key: str):
         from langchain_openai import ChatOpenAI
         key = api_key or os.environ.get("OPENAI_API_KEY")
         return ChatOpenAI(model=model, api_key=key, temperature=0.3)
+
+    if provider == "openrouter":
+        from langchain_openai import ChatOpenAI
+        key = api_key or os.environ.get("OPENROUTER_API_KEY")
+        return ChatOpenAI(
+            model=model or "google/gemini-2.5-flash", 
+            api_key=key, 
+            base_url="https://openrouter.ai/api/v1", 
+            temperature=0.3
+        )
     
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic

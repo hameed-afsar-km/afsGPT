@@ -303,6 +303,37 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
             if res.ok:
                 return res.json()["choices"][0]["message"]["content"]
             return f"OpenAI error: {res.text}"
+
+        # --- OpenRouter (In-Memory Text Extraction Fallback) ---
+        if provider == "openrouter":
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(file_path)
+            docs = loader.load()
+            full_text = "\n".join([d.page_content for d in docs])
+            
+            target_model = model_name if model_name else "google/gemini-2.5-flash"
+            payload = {
+                "model": target_model,
+                "messages": [
+                    {"role": "system", "content": f"Document Text:\n{full_text[:100000]}"}, # Truncate to avoid massive payloads
+                    {"role": "user", "content": question}
+                ],
+                "max_tokens": 1000
+            }
+            res = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}", 
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost:3000",
+                    "X-Title": "AfsGPT"
+                },
+                json=payload,
+                timeout=120
+            )
+            if res.ok:
+                return res.json()["choices"][0]["message"]["content"]
+            return f"OpenRouter error: {res.text}"
             
         return "Provider not supported for direct document analysis."
 
@@ -479,6 +510,46 @@ def analyze_image(body: ImageAnalyzeRequest):
                     errors.append(err_msg)
             except Exception as e:
                 err_msg = f"OpenAI Exception: {str(e)}"
+                log.warning(err_msg)
+                errors.append(err_msg)
+
+        # ─── OpenRouter ──────────────────────────────────────────
+        if selected_provider == "openrouter" and api_key:
+            try:
+                log.info("Attempting OpenRouter image analysis...")
+                api_model = body.model if body.model else "google/gemini-2.5-flash"
+                payload = {
+                    "model": api_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": body.question},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                            ]
+                        }
+                    ],
+                    "max_tokens": 500
+                }
+                res = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}", 
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://localhost:3000",
+                        "X-Title": "AfsGPT"
+                    },
+                    json=payload,
+                    timeout=60
+                )
+                if res.ok:
+                    return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+                else:
+                    err_msg = f"OpenRouter API Error: {res.text}"
+                    log.error(err_msg)
+                    errors.append(err_msg)
+            except Exception as e:
+                err_msg = f"OpenRouter Exception: {str(e)}"
                 log.warning(err_msg)
                 errors.append(err_msg)
 
@@ -693,6 +764,25 @@ async def chat_handler(body: ChatRequest):
             except Exception as e:
                 log.warning(f"Gemini failed, checking for Ollama fallback: {e}")
 
+        if provider == "openrouter":
+            if not api_key: raise HTTPException(status_code=400, detail="OpenRouter API Key missing")
+            try:
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "HTTP-Referer": "http://localhost:3000",
+                        "X-Title": "AfsGPT"
+                    },
+                    json={"model": model, "messages": messages, "stream": False},
+                    timeout=60
+                )
+                if response.ok:
+                    return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
+                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenRouter failed"))
+            except Exception as e:
+                log.warning(f"OpenRouter failed: {e}")
+
         # ─── FINAL FALLBACK: If we reached here, Cloud failed or Ollama was requested ───
         try:
             requests.get("http://localhost:11434/api/tags", timeout=1)
@@ -732,6 +822,17 @@ async def get_provider_models(body: ModelsRequest):
         res = requests.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
         if res.ok:
             return JSONResponse({"models": [m["id"] for m in res.json()["data"] if "gpt" in m["id"]]})
+
+    if provider == "openrouter":
+        if not api_key: return JSONResponse({"models": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"]})
+        try:
+            res = requests.get("https://openrouter.ai/api/v1/models")
+            if res.ok:
+                models_list = [m["id"] for m in res.json().get("data", [])]
+                return JSONResponse({"models": models_list})
+        except Exception as e:
+            log.warning(f"Failed to fetch OpenRouter models: {e}")
+        return JSONResponse({"models": ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"]})
 
     if provider == "gemini":
         # Return defaults if no key is provided or API fetch fails
