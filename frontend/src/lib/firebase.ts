@@ -1,6 +1,12 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { initializeFirestore } from "firebase/firestore";
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  disableNetwork,
+  enableNetwork 
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -16,8 +22,35 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
 });
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
+
+// Manage Firestore network connectivity based on online/offline state to avoid console errors
+if (typeof window !== "undefined") {
+  const handleOffline = () => {
+    console.log("[Firestore] Browser offline. Disabling network connection.");
+    disableNetwork(db).catch((err) => {
+      console.warn("[Firestore] Failed to disable network:", err);
+    });
+  };
+
+  const handleOnline = () => {
+    console.log("[Firestore] Browser online. Enabling network connection.");
+    enableNetwork(db).catch((err) => {
+      console.warn("[Firestore] Failed to enable network:", err);
+    });
+  };
+
+  if (!navigator.onLine) {
+    handleOffline();
+  }
+
+  window.addEventListener("online", handleOnline);
+  window.addEventListener("offline", handleOffline);
+}
 
 export { auth, db, googleProvider };

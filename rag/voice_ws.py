@@ -37,6 +37,17 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 log = logging.getLogger(__name__)
 
+def is_online() -> bool:
+    """Check if the backend is connected to the internet by resolving/connecting to Google DNS."""
+    import socket
+    try:
+        # 8.8.8.8 is Google Public DNS, port 53 is DNS
+        socket.setdefaulttimeout(1.5)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        return True
+    except OSError:
+        return False
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 SAMPLE_RATE        = 16000   # Hz — faster-whisper native
@@ -174,6 +185,28 @@ async def stream_llm(
     Supports: OpenRouter, Ollama, Gemini, OpenAI, Anthropic.
     """
     provider = (provider or "ollama").lower()
+    online_status = await asyncio.to_thread(is_online)
+
+    if not online_status:
+        if provider == "ollama":
+            import httpx
+            ollama_running = False
+            try:
+                async with httpx.AsyncClient(timeout=1) as client:
+                    res = await client.get("http://localhost:11434/api/tags")
+                    if res.status_code == 200:
+                        ollama_running = True
+            except Exception:
+                pass
+
+            if ollama_running:
+                async for token in _stream_ollama(model or "gemma2:2b", messages):
+                    yield token
+            else:
+                yield "[Offline Mode: Local Ollama is not running. Please start Ollama to enable local offline voice chat.]"
+        else:
+            yield f"[Offline Mode: You are offline, so cloud provider '{provider.capitalize()}' is unavailable. Please check your internet connection or switch to local Ollama in settings.]"
+        return
 
     if provider == "openrouter":
         key = api_key or os.environ.get("OPENROUTER_API_KEY", "")

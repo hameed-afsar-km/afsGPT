@@ -88,6 +88,18 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
 
+def is_online() -> bool:
+    """Check if the backend is connected to the internet by resolving/connecting to Google DNS."""
+    import socket
+    try:
+        # 8.8.8.8 is Google Public DNS, port 53 is DNS
+        socket.setdefaulttimeout(1.5)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        return True
+    except OSError:
+        return False
+
+
 def resolve_api_key(provider: str, user_key: Optional[str]) -> Optional[str]:
     provider = provider.lower()
     if user_key:
@@ -369,6 +381,20 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
 @app.post("/query")
 async def ask_question(body: QueryRequest):
     """Answer a question using the documents in a given session collection."""
+    if not is_online():
+        # Check if local Ollama is running
+        ollama_running = False
+        try:
+            requests.get("http://localhost:11434/api/tags", timeout=1)
+            ollama_running = True
+        except:
+            pass
+        if not ollama_running:
+            raise HTTPException(
+                status_code=503,
+                detail="Offline Mode: You are offline, and local Ollama is not running. Please start Ollama to analyze documents locally."
+            )
+
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
@@ -404,6 +430,11 @@ async def ask_question(body: QueryRequest):
 @app.post("/generate-image")
 async def create_image(body: ImageGenRequest):
     """Generates an image via FLUX.1 using Qwen-enhanced prompt."""
+    if not is_online():
+        raise HTTPException(
+            status_code=503,
+            detail="Offline Mode: Image generation requires an active internet connection to contact Hugging Face."
+        )
     # Lazy import
     from image_gen import generate_image
     result = generate_image(body.prompt, IMAGES_DIR)
@@ -435,6 +466,11 @@ async def research_query(body: ResearchRequest):
       2. Searcher  — DuckDuckGo search for each sub-question
       3. Synthesizer — combines findings into a structured Markdown answer
     """
+    if not is_online():
+        raise HTTPException(
+            status_code=503,
+            detail="Offline Mode: The research agent requires an active internet connection to search the web."
+        )
     if not body.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
     log.info(f"[Research] Starting research for: {body.query[:80]}")
@@ -727,6 +763,45 @@ async def chat_handler(body: ChatRequest):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + body.messages
 
     try:
+        # Check online status first
+        if not is_online():
+            # Check if local Ollama is actually available
+            ollama_running = False
+            try:
+                requests.get("http://localhost:11434/api/tags", timeout=1)
+                ollama_running = True
+            except:
+                pass
+
+            if ollama_running:
+                # If they selected Ollama, use the chosen model. Else fallback to gemma2:2b.
+                fallback_model = model if provider == "ollama" else "gemma2:2b"
+                try:
+                    response = requests.post(
+                        "http://localhost:11434/api/chat",
+                        json={"model": fallback_model, "messages": messages, "stream": False},
+                        timeout=60
+                    )
+                    if response.ok:
+                        content = response.json()["message"]["content"]
+                        if provider != "ollama":
+                            content += "\n\n*(Offline Mode: Automatically fell back to local Ollama)*"
+                        return JSONResponse({"content": content})
+                except Exception as e:
+                    log.warning(f"Ollama fallback post failed: {e}")
+
+            if provider == "ollama":
+                raise HTTPException(
+                    status_code=503,
+                    detail="Offline Mode: Local Ollama is not running. Please start Ollama to enable local offline chat."
+                )
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Offline Mode: You are offline, and cloud provider '{provider.capitalize()}' is unavailable. "
+                           "Please check your internet connection or start local Ollama to enable local offline fallback."
+                )
+
         if provider == "ollama":
             # Check if Ollama is actually available
             try:

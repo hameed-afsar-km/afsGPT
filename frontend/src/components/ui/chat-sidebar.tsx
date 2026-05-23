@@ -55,7 +55,7 @@ import { useChat } from "@/context/ChatContext";
 
 export function ChatSidebar() {
     const { user, login, logout } = useAuth();
-    const { activeChatId, setActiveChatId } = useChat();
+    const { activeChatId, setActiveChatId, activeChatTitle } = useChat();
     const [isOpen, setIsOpen] = useState(true);
     const [chatHistory, setChatHistory] = useState<HistorySection[]>([]);
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
@@ -65,6 +65,7 @@ export function ChatSidebar() {
     const [isMobile, setIsMobile] = useState(false);
     const [chatToDelete, setChatToDelete] = useState<string | null>(null);
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+    const [guestEnabled, setGuestEnabled] = useState(false);
 
     useEffect(() => {
         const checkMobile = () => {
@@ -77,8 +78,30 @@ export function ChatSidebar() {
     }, []);
 
     useEffect(() => {
+        // Automatically enable guest mode if offline or if offline chats already exist
+        const offlineChats = JSON.parse(localStorage.getItem("afs-offline-chats") || "[]");
+        if (offlineChats.length > 0 || (typeof window !== "undefined" && !navigator.onLine)) {
+            setGuestEnabled(true);
+        }
+    }, []);
+
+    useEffect(() => {
         if (!user) {
-            setChatHistory([]);
+            const loadOfflineHistory = () => {
+                const offlineChats = JSON.parse(localStorage.getItem("afs-offline-chats") || "[]");
+                const grouped: HistorySection[] = [
+                    {
+                        section: "Offline Chats",
+                        items: offlineChats.map((c: any) => ({
+                            id: c.id,
+                            title: c.title,
+                            createdAt: c.createdAt
+                        }))
+                    }
+                ];
+                setChatHistory(grouped);
+            };
+            loadOfflineHistory();
             return;
         }
 
@@ -104,7 +127,7 @@ export function ChatSidebar() {
         });
 
         return () => unsubscribe();
-    }, [user]);
+    }, [user, activeChatId, activeChatTitle, guestEnabled]);
 
     const handleNewChat = () => {
         setActiveChatId(null);
@@ -112,7 +135,28 @@ export function ChatSidebar() {
     };
 
     const confirmDelete = async () => {
-        if (!user || !chatToDelete) return;
+        if (!chatToDelete) return;
+
+        if (!user) {
+            // Delete offline chat from LocalStorage
+            const offlineChats = JSON.parse(localStorage.getItem("afs-offline-chats") || "[]");
+            const updatedChats = offlineChats.filter((c: any) => c.id !== chatToDelete);
+            localStorage.setItem("afs-offline-chats", JSON.stringify(updatedChats));
+
+            const allOfflineMessages = JSON.parse(localStorage.getItem("afs-offline-messages") || "{}");
+            delete allOfflineMessages[chatToDelete];
+            localStorage.setItem("afs-offline-messages", JSON.stringify(allOfflineMessages));
+
+            // Also delete associated images
+            const offlineImgs = JSON.parse(localStorage.getItem("afs-offline-images") || "[]");
+            const updatedImgs = offlineImgs.filter((img: any) => img.chatId !== chatToDelete);
+            localStorage.setItem("afs-offline-images", JSON.stringify(updatedImgs));
+
+            if (activeChatId === chatToDelete) setActiveChatId(null);
+            setChatToDelete(null);
+            return;
+        }
+
         try {
             await deleteDoc(doc(db, `users/${user.uid}/chats`, chatToDelete));
             
@@ -144,7 +188,23 @@ export function ChatSidebar() {
     };
 
     const saveRename = async () => {
-        if (editingId && editValue.trim() && user) {
+        if (editingId && editValue.trim()) {
+            if (!user) {
+                // Rename offline chat
+                const offlineChats = JSON.parse(localStorage.getItem("afs-offline-chats") || "[]");
+                const chatIndex = offlineChats.findIndex((c: any) => c.id === editingId);
+                if (chatIndex !== -1) {
+                    offlineChats[chatIndex].title = editValue;
+                    localStorage.setItem("afs-offline-chats", JSON.stringify(offlineChats));
+                    // Force refresh sidebar
+                    if (activeChatId === editingId) {
+                        setActiveChatId(editingId);
+                    }
+                }
+                setEditingId(null);
+                return;
+            }
+
             try {
                 await updateDoc(doc(db, `users/${user.uid}/chats`, editingId), {
                     title: editValue,
@@ -239,7 +299,7 @@ export function ChatSidebar() {
 
                     {/* History */}
                     <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
-                        {user ? (
+                        {user || guestEnabled ? (
                             chatHistory.map((section) => (
                                 <div key={section.section} className="mb-6">
                                     <h3 className="px-3 text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-2">
@@ -341,13 +401,20 @@ export function ChatSidebar() {
                                 </div>
                                 <div className="space-y-1">
                                     <p className="text-sm text-white/90 font-medium">Please sign in</p>
-                                    <p className="text-xs text-white/40">Log in to save your chat history and settings.</p>
+                                    <p className="text-xs text-white/40">Sign in to sync your chats to the cloud.</p>
                                 </div>
                                 <button
                                     onClick={login}
-                                    className="w-full py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-white/90 transition-colors"
+                                    className="w-full py-2 bg-white text-black text-sm font-medium rounded-lg hover:bg-white/90 transition-colors cursor-pointer"
                                 >
                                     Sign in with Google
+                                </button>
+                                <div className="text-white/20 text-[10px] uppercase tracking-wider">or</div>
+                                <button
+                                    onClick={() => setGuestEnabled(true)}
+                                    className="w-full py-2 bg-white/10 hover:bg-white/20 text-white text-sm font-medium rounded-lg transition-colors border border-white/10 cursor-pointer"
+                                >
+                                    Use Offline Guest Mode
                                 </button>
                             </div>
                         )}
