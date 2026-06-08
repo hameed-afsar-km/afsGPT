@@ -370,7 +370,36 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
             if res.ok:
                 return res.json()["choices"][0]["message"]["content"]
             return f"OpenRouter error: {res.text}"
+
+        # --- Groq (In-Memory Text Extraction Fallback) ---
+        if provider == "groq":
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(file_path)
+            docs = loader.load()
+            full_text = "\n".join([d.page_content for d in docs])
             
+            target_model = model_name if model_name else "llama3-70b-8192"
+            payload = {
+                "model": target_model,
+                "messages": [
+                    {"role": "system", "content": f"Document Text:\n{full_text[:100000]}"},
+                    {"role": "user", "content": question}
+                ],
+                "max_tokens": 1000
+            }
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=120
+            )
+            if res.ok:
+                return res.json()["choices"][0]["message"]["content"]
+            return f"Groq error: {res.text}"
+
         return "Provider not supported for direct document analysis."
 
     except Exception as e:
@@ -612,6 +641,44 @@ def analyze_image(body: ImageAnalyzeRequest):
                     errors.append(err_msg)
             except Exception as e:
                 err_msg = f"OpenRouter Exception: {str(e)}"
+                log.warning(err_msg)
+                errors.append(err_msg)
+
+        # ─── Groq ──────────────────────────────────────────
+        if selected_provider == "groq" and api_key:
+            try:
+                log.info("Attempting Groq image analysis...")
+                api_model = body.model if body.model else "llama-3.2-90b-vision-preview"
+                payload = {
+                    "model": api_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": body.question},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                            ]
+                        }
+                    ],
+                    "max_tokens": 500
+                }
+                res = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload,
+                    timeout=60
+                )
+                if res.ok:
+                    return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+                else:
+                    err_msg = f"Groq API Error: {res.text}"
+                    log.error(err_msg)
+                    errors.append(err_msg)
+            except Exception as e:
+                err_msg = f"Groq Exception: {str(e)}"
                 log.warning(err_msg)
                 errors.append(err_msg)
 
@@ -911,6 +978,21 @@ async def chat_handler(body: ChatRequest):
             except Exception as e:
                 log.warning(f"OpenRouter failed: {e}")
 
+        if provider == "groq":
+            if not api_key: raise HTTPException(status_code=400, detail="Groq API Key missing")
+            try:
+                response = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": messages, "stream": False},
+                    timeout=60
+                )
+                if response.ok:
+                    return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
+                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Groq failed"))
+            except Exception as e:
+                log.warning(f"Groq failed: {e}")
+
         # ─── FINAL FALLBACK: If we reached here, Cloud failed or Ollama was requested ───
         try:
             requests.get("http://localhost:11434/api/tags", timeout=1)
@@ -988,6 +1070,21 @@ async def get_provider_models(body: ModelsRequest):
 
     if provider == "anthropic":
         return JSONResponse({"models": ["claude-3-5-sonnet-20240620", "claude-3-haiku-20240307", "claude-3-opus-20240229"]})
+
+    if provider == "groq":
+        if not api_key: return JSONResponse({"models": ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"]})
+        try:
+            res = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=5
+            )
+            if res.ok:
+                models_list = [m["id"] for m in res.json().get("data", [])]
+                return JSONResponse({"models": models_list})
+        except Exception as e:
+            log.warning(f"Failed to fetch Groq models: {e}")
+        return JSONResponse({"models": ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"]})
 
     return JSONResponse({"models": []})
 

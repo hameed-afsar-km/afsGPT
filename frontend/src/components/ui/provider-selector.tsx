@@ -17,7 +17,8 @@ import {
     Sparkles,
     Zap,
     Brain,
-    Bot
+    Bot,
+    Cloud
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ const providers: Provider[] = [
     { id: "gemini", name: "Gemini", icon: <Sparkles className="w-4 h-4" />, color: "text-blue-400" },
     { id: "anthropic", name: "Anthropic", icon: <Brain className="w-4 h-4" />, color: "text-orange-400" },
     { id: "openrouter", name: "OpenRouter", icon: <RefreshCcw className="w-4 h-4" />, color: "text-rose-400" },
+    { id: "groq", name: "Groq", icon: <Cloud className="w-4 h-4" />, color: "text-green-400" },
     { id: "ollama", name: "Ollama", icon: <Cpu className="w-4 h-4" />, color: "text-violet-400" },
 ];
 

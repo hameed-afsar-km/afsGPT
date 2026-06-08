@@ -245,6 +245,19 @@ async def stream_llm(
         async for token in _stream_anthropic(key, model, messages):
             yield token
 
+    elif provider == "groq":
+        key = api_key or os.environ.get("GROQ_API_KEY", "")
+        if not key:
+            yield "[Groq API key missing]"
+            return
+        async for token in _stream_openai_compatible(
+            url="https://api.groq.com/openai/v1/chat/completions",
+            model=model or "llama3-70b-8192",
+            messages=messages,
+            api_key=key,
+        ):
+            yield token
+
     else:
         # Ollama (local)
         import httpx

@@ -82,6 +82,16 @@ def get_llm(provider: str, model: str, api_key: str):
         from langchain_anthropic import ChatAnthropic
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         return ChatAnthropic(model=model, api_key=key, temperature=0.3)
+
+    if provider == "groq":
+        from langchain_openai import ChatOpenAI
+        key = api_key or os.environ.get("GROQ_API_KEY")
+        return ChatOpenAI(
+            model=model or "llama3-70b-8192",
+            api_key=key,
+            base_url="https://api.groq.com/openai/v1",
+            temperature=0.3
+        )
     
     # Final Fallback: Ollama (Local)
     return ChatOllama(model="gemma2:2b", temperature=0.3)
