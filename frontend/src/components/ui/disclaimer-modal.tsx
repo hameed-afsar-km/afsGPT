@@ -76,7 +76,51 @@ export function DisclaimerModal() {
                                 className="space-y-4 text-sm text-white/60 leading-relaxed max-h-[26rem] overflow-y-auto custom-scrollbar pr-4 text-left"
                             >
                                 <p>
-                                    This AI app can work in two ways:
+                                    This AI app offers <span className="text-emerald-400 font-semibold">Free Tier</span> mode out of the box — no API keys required:
+                                </p>
+                                <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30">
+                                    <li><span className="text-emerald-400 font-medium">Chat & Research</span> — automatically load-balanced across Gemini 2.5 Flash and Groq Llama 3.3-70b</li>
+                                    <li><span className="text-emerald-400 font-medium">Image Analysis</span> — powered by Gemini 2.5 Flash</li>
+                                    <li>Toggle to <span className="text-amber-400 font-medium">Custom API</span> mode anytime from the chat bar to use your own provider and keys</li>
+                                </ul>
+
+                                <p className="mt-4">
+                                    In Custom API mode, you can add your own keys in Settings:
+                                </p>
+                                <ul className="list-disc list-inside space-y-2 ml-2 font-mono text-[0.8rem] marker:text-white/30">
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GOOGLE_API_KEY</code> — Gemini</li>
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">OPENAI_API_KEY</code> — OpenAI</li>
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">ANTHROPIC_API_KEY</code> — Anthropic</li>
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GROQ_API_KEY</code> — Groq</li>
+                                </ul>
+
+                                <p>These are completely optional — the Free Tier works without them.</p>
+
+                                <p>
+                                    When using your own API key, your selected provider is used directly (no load balancing).
+                                    You can switch between providers anytime from the model dropdown.
+                                </p>
+
+                                <div className="pt-2 space-y-2">
+                                    <p className="font-medium text-white/90">Free Tier Details</p>
+                                    <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30 text-[0.85rem]">
+                                        <li>Chat requests are cycled between Gemini and Groq to stay within rate limits.</li>
+                                        <li>Image analysis always uses Gemini for best vision results.</li>
+                                        <li>The green <span className="text-emerald-400">"Free Tier"</span> badge in the chat bar shows which mode is active — click it to switch.</li>
+                                    </ul>
+                                </div>
+
+                                <div className="pt-2 space-y-2">
+                                    <p className="font-medium text-white/90">Please note:</p>
+                                    <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30">
+                                        <li>Your API usage, limits, and billing are managed by your provider (Custom API mode).</li>
+                                        <li>Some models may require paid access.</li>
+                                        <li>AI responses can sometimes be incorrect, so verify important information.</li>
+                                    </ul>
+                                </div>
+
+                                <p className="text-center pt-6 text-white text-base font-medium">
+                                    Enjoy using the app 🚀
                                 </p>
                                 <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30">
                                     <li>Using your own AI API keys (recommended for online access)</li>

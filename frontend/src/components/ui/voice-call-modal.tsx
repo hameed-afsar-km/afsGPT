@@ -309,13 +309,15 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
             const model = localStorage.getItem("afs-model") || "gemini-2.5-flash";
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = keys[provider] || "";
+            const freeTier = localStorage.getItem("afs-free-tier") !== "false";
 
             ws.send(JSON.stringify({
                 type: "config",
                 provider,
                 model,
-                apiKey,
+                apiKey: freeTier ? "" : apiKey,
                 voice: "en-US-AvaNeural",
+                freeTier,
             }));
         };
 

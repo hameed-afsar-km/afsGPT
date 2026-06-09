@@ -22,6 +22,7 @@ import re
 import requests
 import asyncio
 import io
+import itertools
 import edge_tts
 try:
     import ollama
@@ -137,6 +138,26 @@ def resolve_api_key(provider: str, user_key: Optional[str]) -> Optional[str]:
     return None
 
 
+# ─── Free-tier round-robin across Gemini / Groq ───────────────────────────
+_ROUND_ROBIN_CYCLE = itertools.cycle(["gemini", "groq"])
+_RR_MODEL_MAP = {
+    "gemini": "gemini-2.5-flash",
+    "groq": "llama-3.3-70b-versatile",
+}
+
+def resolve_free_tier_provider(user_provider: str, user_model: str, user_api_key: str | None) -> tuple[str, str, str | None]:
+    """
+    Free-tier: round-robin across Gemini / Groq using backend env keys.
+    Custom API: return user's choices 1:1.
+    Returns (provider, model, api_key).
+    """
+    # No user API key → free-tier round-robin
+    provider = next(_ROUND_ROBIN_CYCLE)
+    model = _RR_MODEL_MAP[provider]
+    api_key = resolve_api_key(provider, user_api_key)
+    return provider, model, api_key
+
+
 def _extract_pdf_text(file_path: str) -> str:
     """Extract text from a PDF with caching. Returns up to 100K chars."""
     if file_path in _pdf_text_cache:
@@ -166,6 +187,7 @@ class QueryRequest(BaseModel):
     apiKey: Optional[str] = None
     provider: Optional[str] = "gemini"
     model: Optional[str] = "gemini-2.5-flash"
+    freeTier: Optional[bool] = False
 
 class ClearRequest(BaseModel):
     session_id: str
@@ -179,18 +201,21 @@ class ImageAnalyzeRequest(BaseModel):
     apiKey: Optional[str] = None
     model: Optional[str] = "gemini-2.5-flash"
     provider: Optional[str] = "gemini"
+    freeTier: Optional[bool] = False
 
 class ResearchRequest(BaseModel):
     query: str
     provider: str = "ollama"
     model: str = "gemma2:2b"
     api_key: str = ""
+    freeTier: Optional[bool] = False
 
 class ChatRequest(BaseModel):
     messages: list
     provider: str
     model: str
     apiKey: Optional[str] = None
+    freeTier: Optional[bool] = False
 
 class ModelsRequest(BaseModel):
     provider: str
@@ -467,7 +492,13 @@ async def ask_question(body: QueryRequest):
 
     # ─── Direct Document Logic (Cloud / No-DB for PDFs) ────────────────────
     provider = body.provider.lower() if body.provider else "gemini"
+    model = body.model
     api_key = resolve_api_key(provider, body.apiKey)
+
+    # Free-tier: round-robin across Gemini / Groq with backend env keys
+    if getattr(body, 'freeTier', False):
+        provider, model, api_key = resolve_free_tier_provider(provider, model, body.apiKey)
+
     if api_key and body.session_id:
         potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id) and f.lower().endswith(".pdf")]
         if potential_files:
@@ -477,8 +508,8 @@ async def ask_question(body: QueryRequest):
                     detail="Cloud analysis requires internet, but you appear to be offline."
                 )
             file_path = os.path.join(UPLOAD_DIR, potential_files[0])
-            log.info(f"[{body.session_id}] Using Direct Analysis Mode ({body.provider}) for {potential_files[0]}")
-            answer = await direct_document_analysis(body.question, file_path, api_key, body.provider, body.model)
+            log.info(f"[{body.session_id}] Using Direct Analysis Mode ({provider}) for {potential_files[0]}")
+            answer = await direct_document_analysis(body.question, file_path, api_key, provider, model)
             return JSONResponse({"answer": answer})
 
     # ─── Standard RAG Logic (Ollama / ChromaDB) ───────────────────────────
@@ -540,14 +571,23 @@ async def research_query(body: ResearchRequest):
     if not body.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
     log.info(f"[Research] Starting research for: {body.query[:80]}")
+
+    provider = body.provider
+    model = body.model
+    api_key = body.api_key
+
+    # Free-tier: round-robin across Gemini / Groq with backend env keys
+    if body.freeTier:
+        provider, model, api_key = resolve_free_tier_provider(provider, model, api_key)
+
     try:
         # Lazy import
         from research_agent import run_research
         answer = run_research(
             query=body.query,
-            provider=body.provider,
-            model=body.model,
-            api_key=body.api_key,
+            provider=provider,
+            model=model,
+            api_key=api_key,
         )
         return JSONResponse({"answer": answer})
     except Exception as e:
@@ -569,7 +609,17 @@ def analyze_image(body: ImageAnalyzeRequest):
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
         selected_provider = body.provider.lower() if body.provider else "gemini"
+        selected_model = body.model
         api_key = resolve_api_key(selected_provider, body.apiKey)
+
+        # Free-tier: always use Gemini for vision (Groq vision models have inconsistent availability)
+        if body.freeTier:
+            selected_provider = "gemini"
+            selected_model = "gemini-2.5-flash"
+            api_key = resolve_api_key("gemini", None)
+
+        # Override model from resolved value
+        body.model = selected_model
 
         # Cloud providers require an API key — fail early instead of falling through
         if selected_provider in _VISION_PROVIDERS and not api_key:
@@ -649,19 +699,49 @@ def analyze_image(body: ImageAnalyzeRequest):
         if selected_provider == "groq":
             log.info("Groq vision...")
             api_model = body.model if body.model else "llama-3.2-90b-vision-preview"
-            res = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": api_model,
-                    "messages": [{"role": "user", "content": [
-                        {"type": "text", "text": body.question},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
-                    ]}],
-                    "max_tokens": 500
-                },
-                timeout=60
-            )
+            vision_models = {"llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview"}
+            if api_model in vision_models:
+                res = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": api_model,
+                        "messages": [{"role": "user", "content": [
+                            {"type": "text", "text": body.question},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                        ]}],
+                        "max_tokens": 500
+                    },
+                    timeout=60
+                )
+            else:
+                log.info(f"Groq model '{api_model}' is not vision-capable; using llama-3.2-90b-vision-preview as fallback")
+                fallback_res = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "llama-3.2-90b-vision-preview",
+                        "messages": [{"role": "user", "content": [
+                            {"type": "text", "text": body.question},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                        ]}],
+                        "max_tokens": 500
+                    },
+                    timeout=60
+                )
+                if not fallback_res.ok:
+                    raise HTTPException(status_code=502, detail=f"Groq fallback error: {fallback_res.text}")
+                description = fallback_res.json()["choices"][0]["message"]["content"]
+                res = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": api_model,
+                        "messages": [{"role": "user", "content": f"{body.question}\n\nImage description: {description}"}],
+                        "max_tokens": 500
+                    },
+                    timeout=60
+                )
             if res.ok:
                 return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
             raise HTTPException(status_code=502, detail=f"Groq error: {res.text}")
@@ -733,6 +813,10 @@ async def chat_handler(body: ChatRequest):
     model = body.model
     api_key = resolve_api_key(provider, body.apiKey)
 
+    # Free-tier: round-robin across Gemini / Groq with backend env keys
+    if body.freeTier:
+        provider, model, api_key = resolve_free_tier_provider(provider, model, body.apiKey)
+
     SYSTEM_PROMPT = (
         "You are Afs AI, a high-end AI assistant, developed by Hameed Afsar KM. Always format your responses beautifully using Markdown. "
         "Use bold for emphasis and clean lists. CRITICAL: Whenever you provide content that represents a file "
@@ -740,7 +824,13 @@ async def chat_handler(body: ChatRequest):
         "markdown code block with the appropriate language label. Always include a comment on the first line with the filename."
     )
 
-    clean_messages = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in body.messages]
+    clean_messages = []
+    for m in body.messages:
+        content = m.get("content", "")
+        if isinstance(content, str) and content.startswith("__IMAGE_UPLOAD__:"):
+            newline_idx = content.find("\n")
+            content = content[newline_idx + 1:] if newline_idx != -1 else "[Image]"
+        clean_messages.append({"role": m.get("role", "user"), "content": content})
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + clean_messages
 
     try:

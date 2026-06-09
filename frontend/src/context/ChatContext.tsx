@@ -284,11 +284,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             const model = localStorage.getItem("afs-model") || "gemma2:2b";
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = provider ? keys[provider] : "";
+            const freeTier = localStorage.getItem("afs-free-tier") !== "false";
 
             const response = await fetch("/api/chat/title", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message, provider, model, apiKey }),
+                body: JSON.stringify({ message, provider, model, apiKey: freeTier ? "" : apiKey, freeTier }),
             });
             if (response.ok) {
                 const data = await response.json();

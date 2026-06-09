@@ -31,6 +31,8 @@ import {
   Minimize2,
   Globe,
   Telescope,
+  Zap,
+  Key,
 } from "lucide-react";
 import { ProviderSelector } from "./provider-selector";
 import { VoiceCallModal } from "./voice-call-modal";
@@ -236,6 +238,20 @@ export function AnimatedAIChat() {
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [editImagePrefix, setEditImagePrefix] = useState("");
+  const [useFreeTier, setUseFreeTier] = useState(true);
+
+  // Load free-tier preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("afs-free-tier");
+    if (saved !== null) {
+      setUseFreeTier(saved === "true");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("afs-free-tier", String(useFreeTier));
+  }, [useFreeTier]);
+
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<any>(null);
   const [isCheckingModel, setIsCheckingModel] = useState(false);
@@ -690,7 +706,7 @@ export function AnimatedAIChat() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               signal: controller?.signal,
-              body: JSON.stringify({ query: content, provider, model, apiKey }),
+              body: JSON.stringify({ query: content, provider, model, apiKey, freeTier: useFreeTier }),
             });
             const resData = await resRes.json();
             if (chatId) setResearchingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
@@ -716,7 +732,8 @@ export function AnimatedAIChat() {
                 question: content,
                 provider,
                 model,
-                apiKey
+                apiKey,
+                freeTier: useFreeTier,
               }),
             });
             const ragData = await ragRes.json();
@@ -747,7 +764,14 @@ export function AnimatedAIChat() {
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = provider ? keys[provider] : "";
 
-            const sanitizedMessages = currentMessages.map((m: any) => ({ role: m.role, content: m.content }));
+            const sanitizedMessages = currentMessages.map((m: any) => {
+              let content = m.content;
+              if (typeof content === "string" && content.startsWith("__IMAGE_UPLOAD__:")) {
+                const newlineIdx = content.indexOf("\n");
+                content = newlineIdx !== -1 ? content.slice(newlineIdx + 1) : "[Image]";
+              }
+              return { role: m.role, content };
+            });
             const response = await fetch("/api/chat", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -756,7 +780,8 @@ export function AnimatedAIChat() {
                 messages: sanitizedMessages,
                 provider,
                 model,
-                apiKey,
+                apiKey: useFreeTier ? "" : apiKey,
+                freeTier: useFreeTier,
               }),
             });
             const data = await response.json();
@@ -1045,7 +1070,8 @@ export function AnimatedAIChat() {
           question: question || "Describe this image in detail.",
           provider: savedProvider,
           model: savedModel,
-          apiKey: apiKey,
+          apiKey: useFreeTier ? "" : apiKey,
+          freeTier: useFreeTier,
         }),
       });
 
@@ -2288,6 +2314,21 @@ export function AnimatedAIChat() {
               <Mic className="w-5 h-5" />
             </motion.button>
             
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setUseFreeTier(!useFreeTier)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border",
+                useFreeTier
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15"
+                  : "bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/15"
+              )}
+              title={useFreeTier ? "Free Tier — click to use your own API key" : "Custom API — click to switch to free tier"}
+            >
+              {useFreeTier ? <Zap className="w-3 h-3" /> : <Key className="w-3 h-3" />}
+              <span>{useFreeTier ? "Free Tier" : "Custom API"}</span>
+            </motion.button>
             <div className="h-6 w-[1px] bg-white/10 mx-1" />
             <ProviderSelector />
           </div>
@@ -2469,7 +2510,7 @@ function CopyButton({ text, showLabel = false, className }: { text: string, show
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    try { navigator.clipboard.writeText(text); } catch {}
+    navigator.clipboard.writeText(text).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -2584,7 +2625,7 @@ function CodeBlock({ className, children, chatTitle, onExpand, ...props }: any) 
   const language = match ? match[1] : "text";
 
   const handleCopy = () => {
-    try { navigator.clipboard.writeText(String(children).replace(/\n$/, "")); } catch {}
+    navigator.clipboard.writeText(String(children).replace(/\n$/, "")).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

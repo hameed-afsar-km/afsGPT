@@ -4,7 +4,7 @@ const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
 
 export async function POST(req: NextRequest) {
     try {
-        const { message, provider, model: rawModel, apiKey } = await req.json();
+        const { message, provider, model: rawModel, apiKey, freeTier } = await req.json();
         let model = rawModel;
 
         if (!provider || !model) {
@@ -30,7 +30,8 @@ export async function POST(req: NextRequest) {
                 messages: messages,
                 provider: provider,
                 model: model,
-                apiKey: apiKey || ""
+                apiKey: apiKey || "",
+                freeTier: freeTier || false,
             })
         });
 

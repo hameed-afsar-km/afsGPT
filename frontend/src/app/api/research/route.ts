@@ -4,7 +4,7 @@ const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
 
 export async function POST(req: NextRequest) {
   try {
-    const { query, provider, model, apiKey } = await req.json();
+    const { query, provider, model, apiKey, freeTier } = await req.json();
 
     if (!query?.trim()) {
       return NextResponse.json({ error: "Query cannot be empty." }, { status: 400 });
@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
         provider: provider || "ollama",
         model: model || "gemma2:2b",
         api_key: apiKey || "",
+        freeTier: freeTier || false,
       }),
       // Research can take a while — give it 90 seconds
       signal: AbortSignal.timeout(90_000),

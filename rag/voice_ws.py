@@ -179,12 +179,18 @@ async def stream_llm(
     provider: str,
     model: str,
     api_key: str,
+    freeTier: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Stream LLM tokens asynchronously.
     Supports: OpenRouter, Ollama, Gemini, OpenAI, Anthropic.
     """
     provider = (provider or "ollama").lower()
+
+    # Free-tier: round-robin across Gemini / Groq with backend env keys
+    if freeTier:
+        from server import resolve_free_tier_provider as _rr
+        provider, model, api_key = _rr(provider, model, api_key)
     online_status = await asyncio.to_thread(is_online)
 
     if not online_status:
@@ -642,6 +648,7 @@ async def voice_websocket_handler(websocket: WebSocket):
                     provider=config["provider"],
                     model=config["model"],
                     api_key=config.get("apiKey", ""),
+                    freeTier=config.get("freeTier", False),
                 ):
                     if cancel_event.is_set():
                         break
