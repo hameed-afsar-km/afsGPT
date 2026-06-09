@@ -75,60 +75,51 @@ export function DisclaimerModal() {
                                 onScroll={handleScroll}
                                 className="space-y-4 text-sm text-white/60 leading-relaxed max-h-[26rem] overflow-y-auto custom-scrollbar pr-4 text-left"
                             >
-                                <p>
-                                    This AI app offers <span className="text-emerald-400 font-semibold">Free Tier</span> mode out of the box — no API keys required:
+                                <p className="text-white/80 text-base">
+                                    This AI app offers <span className="text-emerald-400 font-semibold">Free Tier</span> mode out of the box — <strong>no API keys required</strong>.
                                 </p>
-                                <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30">
-                                    <li><span className="text-emerald-400 font-medium">Chat & Research</span> — automatically load-balanced across Gemini 2.5 Flash and Groq Llama 3.3-70b</li>
-                                    <li><span className="text-emerald-400 font-medium">Image Analysis</span> — powered by Gemini 2.5 Flash</li>
-                                    <li>Toggle to <span className="text-amber-400 font-medium">Custom API</span> mode anytime from the chat bar to use your own provider and keys</li>
+
+                                <h3 className="text-white font-semibold pt-2">Free Tier</h3>
+                                <ul className="list-disc list-inside space-y-1.5 ml-2 marker:text-white/30">
+                                    <li><span className="text-emerald-400 font-medium">Chat & Research</span> — automatically load-balanced across <strong>Gemini 2.5 Flash</strong> and <strong>Groq Llama 3.3-70B</strong></li>
+                                    <li><span className="text-emerald-400 font-medium">Image Analysis</span> — powered by <strong>Gemini 2.5 Flash</strong></li>
+                                    <li>Chat requests are automatically cycled between Gemini and Groq to stay within rate limits.</li>
+                                    <li>Image analysis always uses Gemini for the best vision results.</li>
+                                    <li>The green <span className="text-emerald-400">"Free Tier"</span> badge in the chat bar shows which mode is active and can be clicked to switch modes.</li>
                                 </ul>
 
-                                <p className="mt-4">
-                                    In Custom API mode, you can add your own keys in Settings:
-                                </p>
-                                <ul className="list-disc list-inside space-y-2 ml-2 font-mono text-[0.8rem] marker:text-white/30">
-                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GOOGLE_API_KEY</code> — Gemini</li>
-                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">OPENAI_API_KEY</code> — OpenAI</li>
-                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">ANTHROPIC_API_KEY</code> — Anthropic</li>
-                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GROQ_API_KEY</code> — Groq</li>
+                                <h3 className="text-white font-semibold pt-2">Custom API Mode</h3>
+                                <p>You can switch to <span className="text-amber-400 font-medium">Custom API mode</span> anytime from the chat bar to use your own AI provider and API keys.</p>
+                                <p>In <strong>Settings</strong>, you can optionally add:</p>
+                                <ul className="list-disc list-inside space-y-1.5 ml-2 font-mono text-[0.8rem] marker:text-white/30">
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GOOGLE_API_KEY</code> (Gemini)</li>
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">OPENAI_API_KEY</code> (OpenAI)</li>
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">ANTHROPIC_API_KEY</code> (Anthropic)</li>
+                                    <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GROQ_API_KEY</code> (Groq)</li>
                                 </ul>
-
                                 <p>These are completely optional — the Free Tier works without them.</p>
+                                <p>When using your own API key, requests are sent directly to your selected provider (no load balancing). You can switch between available models and providers anytime from the model dropdown.</p>
 
-                                <p>
-                                    When using your own API key, your selected provider is used directly (no load balancing).
-                                    You can switch between providers anytime from the model dropdown.
-                                </p>
+                                <h3 className="text-white font-semibold pt-2">Local AI with Ollama</h3>
+                                <p>If you prefer not to use cloud APIs, you can run models locally with <strong>Ollama</strong> by downloading the GitHub repository:</p>
+                                <a 
+                                    href="https://github.com/hameed-afsar-km/afsGPT" 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="inline-block text-violet-400 hover:text-violet-300 underline transition-colors break-all"
+                                >
+                                    https://github.com/hameed-afsar-km/afsGPT
+                                </a>
 
-                                <div className="pt-2 space-y-2">
-                                    <p className="font-medium text-white/90">Free Tier Details</p>
-                                    <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30 text-[0.85rem]">
-                                        <li>Chat requests are cycled between Gemini and Groq to stay within rate limits.</li>
-                                        <li>Image analysis always uses Gemini for best vision results.</li>
-                                        <li>The green <span className="text-emerald-400">"Free Tier"</span> badge in the chat bar shows which mode is active — click it to switch.</li>
-                                    </ul>
-                                </div>
-
-                                <div className="pt-2 space-y-2">
-                                    <p className="font-medium text-white/90">Please note:</p>
-                                    <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30">
-                                        <li>Your API usage, limits, and billing are managed by your provider (Custom API mode).</li>
-                                        <li>Some models may require paid access.</li>
-                                        <li>AI responses can sometimes be incorrect, so verify important information.</li>
-                                    </ul>
-                                </div>
+                                <h3 className="text-white font-semibold pt-2">Please Note</h3>
+                                <ul className="list-disc list-inside space-y-1.5 ml-2 marker:text-white/30">
+                                    <li>Your API usage, rate limits, and billing are managed by your chosen provider when using Custom API mode.</li>
+                                    <li>Some models may require paid API access.</li>
+                                    <li>AI responses can sometimes be incorrect, so always verify important information.</li>
+                                </ul>
 
                                 <p className="text-center pt-6 text-white text-base font-medium">
                                     Enjoy using the app 🚀
-                                </p>
-                                <ul className="list-disc list-inside space-y-1 ml-2 marker:text-white/30">
-                                    <li>Using your own AI API keys (recommended for online access)</li>
-                                    <li>Running locally with Ollama</li>
-                                </ul>
-
-                                <p className="mt-4">
-                                    In Settings, you can optionally add:
                                 </p>
                                 <ul className="list-disc list-inside space-y-2 ml-2 font-mono text-[0.8rem] marker:text-white/30">
                                     <li><code className="bg-white/5 px-2 py-0.5 rounded text-white/90">GEMINI_API_KEY</code></li>
