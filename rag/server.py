@@ -816,9 +816,10 @@ async def chat_handler(body: ChatRequest):
                 )
                 if response.ok:
                     return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
-                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenAI failed"))
             except Exception as e:
                 log.warning(f"OpenAI failed: {e}")
+                raise HTTPException(status_code=502, detail=f"OpenAI error: {e}")
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenAI failed"))
 
         if provider == "gemini":
             if not api_key: raise HTTPException(status_code=400, detail="Gemini API Key missing")
@@ -868,9 +869,10 @@ async def chat_handler(body: ChatRequest):
                 )
                 if response.ok:
                     return JSONResponse({"content": response.json()["content"][0]["text"]})
-                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Anthropic failed"))
             except Exception as e:
                 log.warning(f"Anthropic failed: {e}")
+                raise HTTPException(status_code=502, detail=f"Anthropic error: {e}")
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Anthropic failed"))
 
         if provider == "openrouter":
             if not api_key: raise HTTPException(status_code=400, detail="OpenRouter API Key missing")
@@ -887,9 +889,10 @@ async def chat_handler(body: ChatRequest):
                 )
                 if response.ok:
                     return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
-                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenRouter failed"))
             except Exception as e:
                 log.warning(f"OpenRouter failed: {e}")
+                raise HTTPException(status_code=502, detail=f"OpenRouter error: {e}")
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "OpenRouter failed"))
 
         if provider == "groq":
             if not api_key: raise HTTPException(status_code=400, detail="Groq API Key missing")
@@ -902,9 +905,10 @@ async def chat_handler(body: ChatRequest):
                 )
                 if response.ok:
                     return JSONResponse({"content": response.json()["choices"][0]["message"]["content"]})
-                raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Groq failed"))
             except Exception as e:
                 log.warning(f"Groq failed: {e}")
+                raise HTTPException(status_code=502, detail=f"Groq error: {e}")
+            raise HTTPException(status_code=response.status_code, detail=response.json().get("error", {}).get("message", "Groq failed"))
 
         # ─── FINAL FALLBACK: If we reached here, Cloud failed or Ollama was requested ───
         try:

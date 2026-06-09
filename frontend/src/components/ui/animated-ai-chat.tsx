@@ -1121,15 +1121,19 @@ export function AnimatedAIChat() {
       const newState = !isResearchMode;
       setIsResearchMode(newState);
       setActiveIntent(newState ? "research" : null);
+      setValue("");
       setRecentCommand("Research Mode " + (newState ? "ON" : "OFF"));
     } else if (prefix === "/code") {
       setActiveIntent(activeIntent === "code" ? null : "code");
+      setValue("");
       setRecentCommand("Coding Intent " + (activeIntent !== "code" ? "Active" : "Cleared"));
     } else if (prefix === "/brainstorm") {
       setActiveIntent(activeIntent === "brainstorm" ? null : "brainstorm");
+      setValue("");
       setRecentCommand("Brainstorming Intent " + (activeIntent !== "brainstorm" ? "Active" : "Cleared"));
     } else if (prefix === "/image") {
       setActiveIntent(activeIntent === "image" ? null : "image");
+      setValue("");
       setRecentCommand("Image Generation Intent " + (activeIntent !== "image" ? "Active" : "Cleared"));
     } else {
       setValue(prefix + " ");
