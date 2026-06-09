@@ -56,8 +56,8 @@ export function DisclaimerModal() {
                         className="relative w-full max-w-lg md:max-w-2xl bg-[#0d0d0d] border border-white/10 rounded-[2rem] overflow-hidden shadow-[0_30px_60px_-15px_rgba(0,0,0,0.7)]"
                     >
                         {/* Gradient Glow */}
-                        <div className="absolute -top-24 -left-24 w-48 h-48 bg-violet-600/20 rounded-full blur-[80px]" />
-                        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-fuchsia-600/20 rounded-full blur-[80px]" />
+                        <div className="absolute -top-24 -left-24 w-48 h-48 bg-violet-600/20 rounded-full blur-[80px] hidden md:block" />
+                        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-fuchsia-600/20 rounded-full blur-[80px] hidden md:block" />
 
                         <div className="relative p-8 md:p-10 space-y-6 flex flex-col items-center text-center">
                             <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center mb-2">

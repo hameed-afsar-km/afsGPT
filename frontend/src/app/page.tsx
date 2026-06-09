@@ -109,17 +109,10 @@ export default function LandingPage() {
 
   return (
     <div className="relative min-h-screen w-full bg-black text-white overflow-hidden font-sans selection:bg-purple-500/40">
-      {/* Mobile Animated Gradient Background */}
-      <motion.div
+      {/* Mobile Static Gradient Background */}
+      <div
         className="absolute inset-0 z-0 block md:hidden opacity-100"
-        animate={{
-          background: [
-            "linear-gradient(45deg, #0a0014 0%, #1a0b2e 50%, #050014 100%)",
-            "linear-gradient(45deg, #050014 0%, #2d1052 50%, #0a0014 100%)",
-            "linear-gradient(45deg, #0a0014 0%, #1a0b2e 50%, #050014 100%)",
-          ]
-        }}
-        transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+        style={{ background: "linear-gradient(45deg, #0a0014 0%, #1a0b2e 50%, #050014 100%)" }}
       />
 
       {/* Desktop Parallax Background Layer */}
@@ -470,7 +463,7 @@ export default function LandingPage() {
           </div>
         )}
       </AnimatePresence>
-      <div className="fixed inset-0 pointer-events-none z-[110] opacity-[0.03] mix-blend-overlay">
+      <div className="fixed inset-0 pointer-events-none z-[110] opacity-[0.03] mix-blend-overlay hidden md:block">
         <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
           <filter id="noiseFilter">
             <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />

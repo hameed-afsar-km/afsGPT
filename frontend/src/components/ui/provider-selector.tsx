@@ -231,7 +231,7 @@ export function ProviderSelector() {
                                 className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-2xl max-h-[85vh] backdrop-blur-[50px] bg-[#0a0a0a]/90 border border-white/10 rounded-[2rem] shadow-[0_0_100px_rgba(0,0,0,1)] overflow-hidden z-[9999] flex flex-col"
                             >
                                 {/* Grain effect overlay */}
-                                <div className="absolute inset-0 opacity-[0.05] pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')] brightness-100 contrast-150" />
+                                <div className="absolute inset-0 opacity-[0.05] pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')] brightness-100 contrast-150 hidden md:block" />
                                 
                                 {/* Header */}
                                 <div className="relative p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">

@@ -1359,7 +1359,7 @@ export function AnimatedAIChat() {
         {/* Background spotlight */}
         {inputFocused && (
           <motion.div
-            className="fixed w-[60rem] h-[60rem] rounded-full pointer-events-none z-0 opacity-[0.03] bg-gradient-to-r from-violet-500 via-fuchsia-500 to-indigo-500 blur-[120px]"
+            className="fixed w-[60rem] h-[60rem] rounded-full pointer-events-none z-0 opacity-[0.03] bg-gradient-to-r from-violet-500 via-fuchsia-500 to-indigo-500 blur-[120px] hidden md:block"
             animate={{
               x: mousePosition.x - 480,
               y: mousePosition.y - 480,
@@ -1904,7 +1904,7 @@ export function AnimatedAIChat() {
 
         {/* Sticky Input Field in Chat Mode */}
         {isChatMode && (
-          <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none bg-gradient-to-t from-black via-black/80 to-transparent pt-16 pb-2">
+          <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none bg-gradient-to-t from-black via-black/80 to-transparent pt-10 md:pt-16 pb-2">
             <div className="max-w-4xl mx-auto px-4 md:px-6 pb-4 md:pb-6">
               <motion.div
                 layoutId="input-box"
@@ -2133,7 +2133,7 @@ export function AnimatedAIChat() {
           </div>
         )}
 
-        <div className="p-4 relative">
+        <div className="p-3 md:p-4 relative">
           <AnimatePresence>
             {isRecording && (
               <motion.div
@@ -2188,34 +2188,61 @@ export function AnimatedAIChat() {
               </button>
             </motion.div>
           )}
-          <Textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              adjustHeight();
-            }}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
-            placeholder="Ask anything..."
-            containerClassName="w-full"
-            className={cn(
-              "w-full px-4 py-3",
-              "resize-none",
-              "bg-transparent",
-              "border-none",
-              "text-white/90 text-sm leading-relaxed",
-              "focus:outline-none",
-              "placeholder:text-white/20",
-              "min-h-[60px]",
-              isRecording && "opacity-0 pointer-events-none",
-            )}
-            showRing={false}
-          />
+          <div className="relative">
+            <Textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                adjustHeight();
+              }}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              placeholder="Ask anything..."
+              containerClassName="w-full"
+              className={cn(
+                "w-full px-4 py-2 md:py-3 pr-12 md:pr-4",
+                "resize-none",
+                "bg-transparent",
+                "border-none",
+                "text-white/90 text-sm leading-relaxed",
+                "focus:outline-none",
+                "placeholder:text-white/20",
+                "min-h-[44px] md:min-h-[60px]",
+                isRecording && "opacity-0 pointer-events-none",
+              )}
+              showRing={false}
+            />
+            {/* Mobile send button */}
+            <motion.button
+              onClick={() => {
+                if (isGenerating) { stopGeneration(); return; }
+                if (attachedImage) {
+                  sendImageForAnalysis(value.trim(), attachedImage.base64, attachedImage.name);
+                } else {
+                  handleSendMessage();
+                }
+              }}
+              disabled={(!isGenerating && !value.trim() && !attachedImage) || isUploading}
+              className={cn(
+                "md:hidden absolute bottom-1.5 right-1.5 p-2 rounded-xl transition-all duration-300",
+                "flex items-center justify-center",
+                (value.trim() || isGenerating || attachedImage) && !isUploading
+                  ? "bg-white text-black"
+                  : "bg-white/5 text-white/20",
+              )}
+            >
+              {isGenerating ? (
+                <Square className="w-4 h-4 fill-current" />
+              ) : (
+                <SendIcon className="w-4 h-4" />
+              )}
+            </motion.button>
+          </div>
         </div>
 
-        <div className="px-3 md:px-5 pb-3 md:pb-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 md:gap-4 mt-2">
+        <div className="px-3 md:px-5 pb-3 md:pb-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 md:gap-4">
           <div className="flex flex-wrap items-center gap-2 md:gap-3 w-full sm:w-auto">
             {/* Attachments Dropdown */}
             <div className="relative attach-menu-container">
@@ -2224,11 +2251,11 @@ export function AnimatedAIChat() {
                 whileTap={{ scale: 0.9 }}
                 onClick={() => setShowAttachMenu(!showAttachMenu)}
                 className={cn(
-                  "p-2.5 rounded-xl transition-all duration-300",
+                  "p-2 md:p-2.5 rounded-xl transition-all duration-300",
                   showAttachMenu ? "bg-white/15 text-white" : "text-white/30 hover:text-white/90 hover:bg-white/5"
                 )}
               >
-                <Paperclip className="w-5 h-5" />
+                <Paperclip className="w-4 h-4 md:w-5 md:h-5" />
               </motion.button>
               
               <AnimatePresence>
@@ -2265,11 +2292,11 @@ export function AnimatedAIChat() {
                 whileTap={{ scale: 0.9 }}
                 onClick={() => setShowActionsMenu(!showActionsMenu)}
                 className={cn(
-                  "p-2.5 rounded-xl transition-all duration-300",
+                  "p-2 md:p-2.5 rounded-xl transition-all duration-300",
                   showActionsMenu ? "bg-white/15 text-white" : "text-white/30 hover:text-white/90 hover:bg-white/5"
                 )}
               >
-                <Command className="w-5 h-5" />
+                <Command className="w-4 h-4 md:w-5 md:h-5" />
               </motion.button>
 
               <AnimatePresence>
@@ -2309,9 +2336,9 @@ export function AnimatedAIChat() {
               whileTap={{ scale: 0.9 }}
               onClick={() => setIsCallOpen(true)}
               title="Start Voice Call"
-              className="p-2.5 rounded-xl transition-colors text-white/30 hover:text-violet-400 hover:bg-violet-500/10"
+              className="p-2 md:p-2.5 rounded-xl transition-colors text-white/30 hover:text-violet-400 hover:bg-violet-500/10"
             >
-              <Mic className="w-5 h-5" />
+              <Mic className="w-4 h-4 md:w-5 md:h-5" />
             </motion.button>
             
             <motion.button
@@ -2319,7 +2346,7 @@ export function AnimatedAIChat() {
               whileTap={{ scale: 0.95 }}
               onClick={() => setUseFreeTier(!useFreeTier)}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border",
+                "flex items-center gap-1 px-2 py-1 md:gap-1.5 md:px-2.5 md:py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border",
                 useFreeTier
                   ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15"
                   : "bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/15"
@@ -2329,7 +2356,7 @@ export function AnimatedAIChat() {
               {useFreeTier ? <Zap className="w-3 h-3" /> : <Key className="w-3 h-3" />}
               <span>{useFreeTier ? "Free Tier" : "Custom API"}</span>
             </motion.button>
-            <div className="h-6 w-[1px] bg-white/10 mx-1" />
+            <div className="h-5 md:h-6 w-[1px] bg-white/10 mx-1" />
             <ProviderSelector />
           </div>
 
@@ -2344,8 +2371,8 @@ export function AnimatedAIChat() {
             }}
             disabled={(!isGenerating && !value.trim() && !attachedImage) || isUploading}
             className={cn(
-              "px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
-              "flex items-center gap-2",
+              "hidden md:flex px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all duration-300",
+              "items-center gap-2",
               (value.trim() || isGenerating || attachedImage) && !isUploading
                 ? "bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                 : "bg-white/5 text-white/20",

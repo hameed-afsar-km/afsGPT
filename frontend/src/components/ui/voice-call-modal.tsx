@@ -622,7 +622,7 @@ export function VoiceCallModal({ isOpen, onClose }: VoiceCallModalProps) {
                 >
                     {/* Ambient Background Glow */}
                     <motion.div
-                        className="absolute inset-0 opacity-30 pointer-events-none"
+                        className="absolute inset-0 opacity-30 pointer-events-none hidden md:block"
                         animate={{ background: `radial-gradient(circle at 50% 40%, ${color}40 0%, transparent 60%)` }}
                         transition={{ duration: 2 }}
                     />
