@@ -46,6 +46,7 @@ interface ChatContextType {
     sendMessageToFirestore: (chatId: string, message: Message) => Promise<void>;
     deleteMessagesAfter: (chatId: string, index: number, newMessage?: Message) => Promise<void>;
     saveGeneratedImage: (chatId: string, url: string, prompt: string) => Promise<void>;
+    generateChatTitle: (chatId: string, message: string) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -218,14 +219,37 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         syncOfflineData();
     }, [user]);
 
+    const extractTitleFromMessage = (message: string): string => {
+        const firstLine = message.split('\n')[0].trim();
+        const cleaned = firstLine.replace(/^!\[.*?\]\(.*?\)/, '').trim();
+        if (!cleaned) return "New Chat";
+        return cleaned.length <= 40 ? cleaned : cleaned.substring(0, 37) + '...';
+    };
+
+    const setChatTitle = async (chatId: string, title: string) => {
+        if (user) {
+            await updateDoc(doc(db, `users/${user.uid}/chats`, chatId), { title });
+        } else {
+            const offlineChats = JSON.parse(localStorage.getItem("afs-offline-chats") || "[]");
+            const chatIndex = offlineChats.findIndex((c: any) => c.id === chatId);
+            if (chatIndex !== -1) {
+                offlineChats[chatIndex].title = title;
+                localStorage.setItem("afs-offline-chats", JSON.stringify(offlineChats));
+            }
+        }
+        if (activeChatId === chatId) {
+            setActiveChatTitle(title);
+        }
+    };
+
     const createNewChat = async (firstMessage: string) => {
+        const fallbackTitle = extractTitleFromMessage(firstMessage);
+
         if (!user) {
-            // Guest/Offline Mode creation
             const newChatId = "offline_" + Date.now();
-            const tempTitle = "New Chat...";
             const newChat = {
                 id: newChatId,
-                title: tempTitle,
+                title: fallbackTitle,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
             };
@@ -235,29 +259,26 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             localStorage.setItem("afs-offline-chats", JSON.stringify(offlineChats));
 
             setActiveChatId(newChatId);
-            
-            // Asynchronously generate title
-            generateAndSetTitle(newChatId, firstMessage);
+            setActiveChatTitle(fallbackTitle);
+
+            generateChatTitle(newChatId, firstMessage);
             return newChatId;
         }
 
-        const tempTitle = "New Chat...";
-
         const chatRef = await addDoc(collection(db, `users/${user.uid}/chats`), {
-            title: tempTitle,
+            title: fallbackTitle,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
 
         setActiveChatId(chatRef.id);
-        
-        // Asynchronously generate title
-        generateAndSetTitle(chatRef.id, firstMessage);
+        setActiveChatTitle(fallbackTitle);
 
+        generateChatTitle(chatRef.id, firstMessage);
         return chatRef.id;
     };
 
-    const generateAndSetTitle = async (chatId: string, firstMessage: string) => {
+    const generateChatTitle = async (chatId: string, message: string) => {
         try {
             const provider = localStorage.getItem("afs-provider") || "ollama";
             const model = localStorage.getItem("afs-model") || "gemma2:2b";
@@ -267,27 +288,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             const response = await fetch("/api/chat/title", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: firstMessage, provider, model, apiKey }),
+                body: JSON.stringify({ message, provider, model, apiKey }),
             });
             if (response.ok) {
                 const data = await response.json();
                 if (data.title) {
-                    if (user) {
-                        await updateDoc(doc(db, `users/${user.uid}/chats`, chatId), {
-                            title: data.title
-                        });
-                    } else {
-                        // Offline title update
-                        const offlineChats = JSON.parse(localStorage.getItem("afs-offline-chats") || "[]");
-                        const chatIndex = offlineChats.findIndex((c: any) => c.id === chatId);
-                        if (chatIndex !== -1) {
-                            offlineChats[chatIndex].title = data.title;
-                            localStorage.setItem("afs-offline-chats", JSON.stringify(offlineChats));
-                            if (activeChatId === chatId) {
-                                setActiveChatTitle(data.title);
-                            }
-                        }
-                    }
+                    await setChatTitle(chatId, data.title);
                 }
             }
         } catch (error) {
@@ -410,7 +416,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             createNewChat,
             sendMessageToFirestore,
             deleteMessagesAfter,
-            saveGeneratedImage
+            saveGeneratedImage,
+            generateChatTitle
         }}>
             {children}
         </ChatContext.Provider>

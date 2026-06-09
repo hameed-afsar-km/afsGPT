@@ -16,12 +16,24 @@ from typing import Optional
 
 LLM_MODEL = "gemma2:2b"    # swap to any model pulled via `ollama pull`
 
+_llm_cache: dict = {}
+
+def _llm_cache_key(api_key: Optional[str] = None) -> str:
+    google_key = api_key or os.environ.get("GOOGLE_API_KEY")
+    return f"google:{google_key}" if google_key else "ollama"
+
 def get_llm(api_key: Optional[str] = None):
-    """Dynamically choose the LLM for RAG."""
+    """Dynamically choose the LLM for RAG. Cached."""
+    key = _llm_cache_key(api_key)
+    if key in _llm_cache:
+        return _llm_cache[key]
     google_key = api_key or os.environ.get("GOOGLE_API_KEY")
     if google_key:
-        return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_key)
-    return OllamaLLM(model=LLM_MODEL)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_key)
+    else:
+        llm = OllamaLLM(model=LLM_MODEL)
+    _llm_cache[key] = llm
+    return llm
 
 
 # ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -44,12 +56,17 @@ prompt = ChatPromptTemplate.from_template(RAG_PROMPT)
 
 # ─── Chain builder ────────────────────────────────────────────────────────────
 
+_chain_cache: dict = {}
+
 def _format_docs(docs) -> str:
     return "\n\n---\n\n".join(doc.page_content for doc in docs)
 
 
 def build_rag_chain(collection_name: str = "rag_store", api_key: Optional[str] = None):
-    """Return a runnable RAG chain for the given ChromaDB collection."""
+    """Return a runnable RAG chain for the given ChromaDB collection. Cached."""
+    key = f"{collection_name}:{_llm_cache_key(api_key)}"
+    if key in _chain_cache:
+        return _chain_cache[key]
     retriever = get_retriever(collection_name=collection_name, api_key=api_key)
     llm = get_llm(api_key=api_key)
 
@@ -62,6 +79,7 @@ def build_rag_chain(collection_name: str = "rag_store", api_key: Optional[str] =
         | llm
         | StrOutputParser()
     )
+    _chain_cache[key] = chain
     return chain
 
 

@@ -23,7 +23,6 @@ import requests
 import asyncio
 import io
 import edge_tts
-import gc
 try:
     import ollama
 except ImportError:
@@ -88,16 +87,35 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
 
+# Track background ingestion tasks so /query knows if a session is still processing
+_processing_sessions: dict = {}
+
+# Cache for PDF text extraction to avoid re-parsing on every query
+_pdf_text_cache: dict = {}
+
+_online_cache: Optional[tuple[bool, float]] = None
+_is_online_lock = False
+
 def is_online() -> bool:
-    """Check if the backend is connected to the internet by resolving/connecting to Google DNS."""
+    """Check if the backend is connected to the internet. Result cached for 30s."""
+    global _online_cache, _is_online_lock
+    now = __import__('time').time()
+    if _online_cache is not None and (now - _online_cache[1]) < 30:
+        return _online_cache[0]
+    if _is_online_lock:
+        return _online_cache[0] if _online_cache else True
+    _is_online_lock = True
     import socket
     try:
-        # 8.8.8.8 is Google Public DNS, port 53 is DNS
-        socket.setdefaulttimeout(1.5)
+        socket.setdefaulttimeout(1.0)
         socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        _online_cache = (True, now)
         return True
     except OSError:
+        _online_cache = (False, now)
         return False
+    finally:
+        _is_online_lock = False
 
 
 def resolve_api_key(provider: str, user_key: Optional[str]) -> Optional[str]:
@@ -117,6 +135,28 @@ def resolve_api_key(provider: str, user_key: Optional[str]) -> Optional[str]:
             return gemini_key
 
     return None
+
+
+def _extract_pdf_text(file_path: str) -> str:
+    """Extract text from a PDF with caching. Returns up to 100K chars."""
+    if file_path in _pdf_text_cache:
+        return _pdf_text_cache[file_path]
+    from langchain_community.document_loaders import PyPDFLoader
+    loader = PyPDFLoader(file_path)
+    docs = loader.load()
+    full_text = "\n".join([d.page_content for d in docs])
+    # Cache to disk as well
+    cache_path = file_path + ".txt"
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.write(full_text)
+    except Exception:
+        pass
+    # Keep only first 100K chars
+    truncated = full_text[:100000] if len(full_text) > 100000 else full_text
+    _pdf_text_cache[file_path] = truncated
+    return truncated
+
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -170,15 +210,51 @@ def health_check():
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
+async def _generate_thumbnail_async(save_path: str, session_id: str):
+    """Generate PDF thumbnail in background thread — non-blocking."""
+    if not fitz:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _generate_thumbnail_sync, save_path, session_id)
+    except Exception as te:
+        log.warning(f"[{session_id}] Thumbnail generation failed: {te}")
+
+
+def _generate_thumbnail_sync(save_path: str, session_id: str):
+    thumb_filename = f"thumb_{session_id}_{uuid.uuid4().hex[:8]}.png"
+    thumb_path = os.path.join(THUMBNAILS_DIR, thumb_filename)
+    doc_pdf = fitz.open(save_path)
+    if len(doc_pdf) > 0:
+        page = doc_pdf[0]
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
+        pix.save(thumb_path)
+    doc_pdf.close()
+
+
+async def _ingest_in_background(session_id: str, save_path: str, api_key: Optional[str], filename: str):
+    """Run document ingestion in a background thread, with error handling."""
+    try:
+        from vector import ingest_file
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, ingest_file, save_path, session_id, api_key)
+        log.info(f"[{session_id}] Background ingestion completed for '{filename}'.")
+    except Exception as e:
+        log.error(f"[{session_id}] Background ingestion failed: {e}")
+    finally:
+        _processing_sessions.pop(session_id, None)
+
+
 @app.post("/upload")
-def upload_file(
+async def upload_file(
     file: UploadFile = File(...), 
     session_id: Optional[str] = Form(None),
     apiKey: Optional[str] = Form(None)
 ):
     """
     Receive an uploaded file, save it temporarily,
-    ingest into a unique ChromaDB collection, return a session_id.
+    ingest into a unique ChromaDB collection (async background), return a session_id.
     """
     ext = os.path.splitext(file.filename)[-1].lower()
     if ext not in ALLOWED_EXT:
@@ -197,54 +273,32 @@ def upload_file(
 
     log.info(f"[{session_id}] Saved '{file.filename}' → '{save_path}'")
 
-    # Lazy import
-    from vector import ingest_file
-    
-    # --- Conditional Ingestion ---
-    try:
-        # If API key is provided, we skip local ingestion (ChromaDB/Ollama) 
-        # because we will use Direct Analysis in the /query route.
-        if apiKey:
-            log.info(f"[{session_id}] Cloud Mode detected. Skipping local ingestion for {file.filename}.")
-        else:
-            log.info(f"[{session_id}] Local Mode detected. Ingesting {file.filename} into ChromaDB...")
-            ingest_file(path=save_path, collection_name=session_id, api_key=apiKey)
-            log.info(f"[{session_id}] Ingested '{file.filename}' into ChromaDB.")
-    except Exception as e:
-        log.error(f"[{session_id}] Ingestion failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Ingestion error: {str(e)}")
+    # --- Conditional Ingestion (background if local mode) ---
+    is_processing = False
+    if apiKey:
+        log.info(f"[{session_id}] Cloud Mode detected. Skipping local ingestion.")
+    else:
+        log.info(f"[{session_id}] Local Mode — spawning background ingestion...")
+        _processing_sessions[session_id] = True
+        is_processing = True
+        asyncio.create_task(_ingest_in_background(session_id, save_path, apiKey, file.filename))
 
-    # --- Generate Thumbnail for PDFs ---
+    # Generate thumbnail in background so upload returns immediately
     thumbnail_url = None
     if ext == ".pdf" and fitz:
-        try:
-            # Create a unique thumbnail filename
-            thumb_filename = f"thumb_{session_id}_{uuid.uuid4().hex[:8]}.png"
-            thumb_path = os.path.join(THUMBNAILS_DIR, thumb_filename)
-            
-            doc_pdf = fitz.open(save_path)
-            if len(doc_pdf) > 0:
-                page = doc_pdf[0]
-                # Scale down for a thumbnail
-                pix = page.get_pixmap(matrix=fitz.Matrix(0.3, 0.3)) 
-                pix.save(thumb_path)
-                thumbnail_url = f"/static/thumbnails/{thumb_filename}"
-            doc_pdf.close()
-        except Exception as te:
-            log.warning(f"Failed to generate thumbnail: {te}")
+        asyncio.create_task(_generate_thumbnail_async(save_path, session_id))
 
-    # Note: We NO LONGER delete the file in 'finally' if it's a PDF 
-    # because direct_document_analysis needs it for cloud mode.
+    # Don't delete PDFs — direct_document_analysis needs them
     if ext != ".pdf":
         if os.path.exists(save_path):
             os.remove(save_path)
-    
-    gc.collect() # Force cleanup
+
     return JSONResponse({
         "session_id": session_id,
         "filename":   file.filename,
         "thumbnail":  thumbnail_url,
-        "message":    "File received. Analysis mode: Cloud Direct (No-DB)." if ".pdf" in file.filename.lower() else "File ingested into database."
+        "processing": is_processing,
+        "message":    "File received. Analysis mode: Cloud Direct (No-DB)." if ".pdf" in file.filename.lower() else "File received. Background ingestion started."
     })
 
 
@@ -314,18 +368,14 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
                 return res.json()["content"][0]["text"]
             return f"Anthropic error: {res.text}"
 
-        # --- OpenAI (In-Memory Text Extraction Fallback) ---
+        # --- OpenAI (In-Memory Text Extraction Fallback, with caching) ---
         if provider == "openai":
-            from langchain_community.document_loaders import PyPDFLoader
-            loader = PyPDFLoader(file_path)
-            docs = loader.load()
-            full_text = "\n".join([d.page_content for d in docs])
-            
+            full_text = _extract_pdf_text(file_path)
             target_model = model_name if model_name else "gpt-4o-mini"
             payload = {
                 "model": target_model,
                 "messages": [
-                    {"role": "system", "content": f"Document Text:\n{full_text[:100000]}"}, # Truncate to avoid massive payloads
+                    {"role": "system", "content": f"Document Text:\n{full_text}"},
                     {"role": "user", "content": question}
                 ],
                 "max_tokens": 1000
@@ -340,18 +390,14 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
                 return res.json()["choices"][0]["message"]["content"]
             return f"OpenAI error: {res.text}"
 
-        # --- OpenRouter (In-Memory Text Extraction Fallback) ---
+        # --- OpenRouter (In-Memory Text Extraction Fallback, with caching) ---
         if provider == "openrouter":
-            from langchain_community.document_loaders import PyPDFLoader
-            loader = PyPDFLoader(file_path)
-            docs = loader.load()
-            full_text = "\n".join([d.page_content for d in docs])
-            
+            full_text = _extract_pdf_text(file_path)
             target_model = model_name if model_name else "google/gemini-2.5-flash"
             payload = {
                 "model": target_model,
                 "messages": [
-                    {"role": "system", "content": f"Document Text:\n{full_text[:100000]}"}, # Truncate to avoid massive payloads
+                    {"role": "system", "content": f"Document Text:\n{full_text}"},
                     {"role": "user", "content": question}
                 ],
                 "max_tokens": 1000
@@ -371,18 +417,14 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
                 return res.json()["choices"][0]["message"]["content"]
             return f"OpenRouter error: {res.text}"
 
-        # --- Groq (In-Memory Text Extraction Fallback) ---
+        # --- Groq (In-Memory Text Extraction Fallback, with caching) ---
         if provider == "groq":
-            from langchain_community.document_loaders import PyPDFLoader
-            loader = PyPDFLoader(file_path)
-            docs = loader.load()
-            full_text = "\n".join([d.page_content for d in docs])
-            
+            full_text = _extract_pdf_text(file_path)
             target_model = model_name if model_name else "llama3-70b-8192"
             payload = {
                 "model": target_model,
                 "messages": [
-                    {"role": "system", "content": f"Document Text:\n{full_text[:100000]}"},
+                    {"role": "system", "content": f"Document Text:\n{full_text}"},
                     {"role": "user", "content": question}
                 ],
                 "max_tokens": 1000
@@ -410,43 +452,38 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
 @app.post("/query")
 async def ask_question(body: QueryRequest):
     """Answer a question using the documents in a given session collection."""
-    if not is_online():
-        # Check if local Ollama is running
-        ollama_running = False
-        try:
-            requests.get("http://localhost:11434/api/tags", timeout=1)
-            ollama_running = True
-        except:
-            pass
-        if not ollama_running:
-            raise HTTPException(
-                status_code=503,
-                detail="Offline Mode: You are offline, and local Ollama is not running. Please start Ollama to analyze documents locally."
-            )
-
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     log.info(f"[{body.session_id}] Question: {body.question}")
     
-    # ─── New Direct Document Logic (Bypass DB for PDFs on Render) ───────────
+    # ─── Check if local ingestion is still processing ────────────────────
+    if body.session_id in _processing_sessions:
+        log.info(f"[{body.session_id}] Ingestion still in progress — returning 202")
+        return JSONResponse(
+            {"status": "processing", "detail": "Document is still being indexed. Please try again in a moment."},
+            status_code=202
+        )
+
+    # ─── Direct Document Logic (Cloud / No-DB for PDFs) ────────────────────
     provider = body.provider.lower() if body.provider else "gemini"
     api_key = resolve_api_key(provider, body.apiKey)
     if api_key and body.session_id:
-        # Find the uploaded file for this session
         potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id) and f.lower().endswith(".pdf")]
         if potential_files:
+            if not is_online():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Cloud analysis requires internet, but you appear to be offline."
+                )
             file_path = os.path.join(UPLOAD_DIR, potential_files[0])
             log.info(f"[{body.session_id}] Using Direct Analysis Mode ({body.provider}) for {potential_files[0]}")
             answer = await direct_document_analysis(body.question, file_path, api_key, body.provider, body.model)
-            gc.collect()
             return JSONResponse({"answer": answer})
 
     # ─── Standard RAG Logic (Ollama / ChromaDB) ───────────────────────────
     try:
-        # Lazy import
         from rag_chain import query
-        # Pass resolved api_key to the RAG chain logic
         answer = query(question=body.question, collection_name=body.session_id, api_key=api_key)
         log.info(f"[{body.session_id}] Answer generated.")
     except Exception as e:
@@ -518,276 +555,152 @@ async def research_query(body: ResearchRequest):
         raise HTTPException(status_code=500, detail=f"Research agent error: {str(e)}")
 
 
+_VISION_PROVIDERS = {"gemini", "openai", "openrouter", "groq", "anthropic"}
+
 @app.post("/analyze-image")
 def analyze_image(body: ImageAnalyzeRequest):
-    """Analyze an image using LLaVA via Ollama."""
+    """Analyze an image using the selected provider's vision model."""
     if not body.image_base64.strip():
         raise HTTPException(status_code=400, detail="Image data cannot be empty.")
 
     try:
-        log.info(f"Received image analysis request. Question: {body.question[:50]}...")
+        log.info(f"Image analysis request: {body.question[:50]}... provider={body.provider} model={body.model}")
         
         header, _, data = body.image_base64.partition(",")
         clean_base64 = data if data else body.image_base64
-
-        # ─── Strict Provider & Model Adherence ───────────────────────
         selected_provider = body.provider.lower() if body.provider else "gemini"
         api_key = resolve_api_key(selected_provider, body.apiKey)
-        
-        errors = []
+
+        # Cloud providers require an API key — fail early instead of falling through
+        if selected_provider in _VISION_PROVIDERS and not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No API key found for {selected_provider}. Please add your key in Settings → API Keys."
+            )
 
         # ─── Google Gemini ──────────────────────────────────────────
-        if selected_provider == "gemini" and api_key:
-            try:
-                log.info(f"Attempting Gemini image analysis with {body.model}...")
-                
-                target_model = body.model if body.model else "gemini-2.5-flash"
-                api_model = target_model
-
-                # Use New SDK if available, else Old SDK
-                if new_genai:
-                    client = new_genai.Client(api_key=api_key)
-                    img_data = base64.b64decode(clean_base64)
-                    response = client.models.generate_content(
-                        model=api_model,
-                        contents=[
-                            genai_types.Part.from_bytes(data=img_data, mime_type='image/jpeg'),
-                            body.question
-                        ]
-                    )
-                    if response.text:
-                        return JSONResponse({"answer": response.text})
-                else:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel(api_model)
-                    img_data = base64.b64decode(clean_base64)
-                    response = model.generate_content([body.question, {'mime_type': 'image/jpeg', 'data': img_data}])
-                    if response.text:
-                        return JSONResponse({"answer": response.text})
-            except Exception as e:
-                err_msg = f"Gemini Error: {str(e)}"
-                log.warning(err_msg)
-                errors.append(err_msg)
+        if selected_provider == "gemini":
+            log.info(f"Gemini vision ({body.model})...")
+            target_model = body.model if body.model else "gemini-2.5-flash"
+            if new_genai:
+                client = new_genai.Client(api_key=api_key)
+                img_data = base64.b64decode(clean_base64)
+                response = client.models.generate_content(
+                    model=target_model,
+                    contents=[genai_types.Part.from_bytes(data=img_data, mime_type='image/jpeg'), body.question]
+                )
+                if response.text:
+                    return JSONResponse({"answer": response.text})
+            else:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(target_model)
+                img_data = base64.b64decode(clean_base64)
+                response = model.generate_content([body.question, {'mime_type': 'image/jpeg', 'data': img_data}])
+                if response.text:
+                    return JSONResponse({"answer": response.text})
+            raise HTTPException(status_code=500, detail="Gemini returned empty response.")
 
         # ─── OpenAI GPT-4o ──────────────────────────────────────────
-        if (selected_provider == "openai" or not selected_provider) and api_key:
-            try:
-                log.info("Attempting OpenAI (GPT-4o) image analysis...")
-                api_model = body.model if body.model else "gpt-4o-mini"
-                payload = {
+        if selected_provider == "openai":
+            log.info("OpenAI vision...")
+            api_model = body.model if body.model else "gpt-4o-mini"
+            res = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
                     "model": api_model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": body.question},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
-                            ]
-                        }
-                    ],
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": body.question},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                    ]}],
                     "max_tokens": 500
-                }
-                res = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json=payload,
-                    timeout=60
-                )
-                if res.ok:
-                    return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
-                else:
-                    err_msg = f"OpenAI API Error: {res.text}"
-                    log.error(err_msg)
-                    errors.append(err_msg)
-            except Exception as e:
-                err_msg = f"OpenAI Exception: {str(e)}"
-                log.warning(err_msg)
-                errors.append(err_msg)
+                },
+                timeout=60
+            )
+            if res.ok:
+                return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+            raise HTTPException(status_code=502, detail=f"OpenAI error: {res.text}")
 
         # ─── OpenRouter ──────────────────────────────────────────
-        if selected_provider == "openrouter" and api_key:
-            try:
-                log.info("Attempting OpenRouter image analysis...")
-                api_model = body.model if body.model else "google/gemini-2.5-flash"
-                payload = {
+        if selected_provider == "openrouter":
+            log.info("OpenRouter vision...")
+            api_model = body.model if body.model else "google/gemini-2.5-flash"
+            res = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost:3000", "X-Title": "AfsGPT"
+                },
+                json={
                     "model": api_model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": body.question},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
-                            ]
-                        }
-                    ],
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": body.question},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                    ]}],
                     "max_tokens": 500
-                }
-                res = requests.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}", 
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "http://localhost:3000",
-                        "X-Title": "AfsGPT"
-                    },
-                    json=payload,
-                    timeout=60
-                )
-                if res.ok:
-                    return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
-                else:
-                    err_msg = f"OpenRouter API Error: {res.text}"
-                    log.error(err_msg)
-                    errors.append(err_msg)
-            except Exception as e:
-                err_msg = f"OpenRouter Exception: {str(e)}"
-                log.warning(err_msg)
-                errors.append(err_msg)
+                },
+                timeout=60
+            )
+            if res.ok:
+                return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+            raise HTTPException(status_code=502, detail=f"OpenRouter error: {res.text}")
 
         # ─── Groq ──────────────────────────────────────────
-        if selected_provider == "groq" and api_key:
-            try:
-                log.info("Attempting Groq image analysis...")
-                api_model = body.model if body.model else "llama-3.2-90b-vision-preview"
-                payload = {
+        if selected_provider == "groq":
+            log.info("Groq vision...")
+            api_model = body.model if body.model else "llama-3.2-90b-vision-preview"
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
                     "model": api_model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": body.question},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
-                            ]
-                        }
-                    ],
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": body.question},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_base64}"}}
+                    ]}],
                     "max_tokens": 500
-                }
-                res = requests.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json=payload,
-                    timeout=60
-                )
-                if res.ok:
-                    return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
-                else:
-                    err_msg = f"Groq API Error: {res.text}"
-                    log.error(err_msg)
-                    errors.append(err_msg)
-            except Exception as e:
-                err_msg = f"Groq Exception: {str(e)}"
-                log.warning(err_msg)
-                errors.append(err_msg)
+                },
+                timeout=60
+            )
+            if res.ok:
+                return JSONResponse({"answer": res.json()["choices"][0]["message"]["content"]})
+            raise HTTPException(status_code=502, detail=f"Groq error: {res.text}")
 
         # ─── Anthropic Claude ───────────────────────────────────────
-        if selected_provider == "anthropic" and api_key:
-            try:
-                log.info(f"Attempting Anthropic image analysis with {body.model}...")
-                api_model = body.model if body.model else "claude-3-5-sonnet-20240620"
-                
-                payload = {
-                    "model": api_model,
-                    "max_tokens": 1024,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": "image/jpeg",
-                                        "data": clean_base64
-                                    }
-                                },
-                                {
-                                    "type": "text",
-                                    "text": body.question
-                                }
-                            ]
-                        }
-                    ]
-                }
-                res = requests.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
-                    },
-                    json=payload,
-                    timeout=60
-                )
-                if res.ok:
-                    data = res.json()
-                    return JSONResponse({"answer": data["content"][0]["text"]})
-                else:
-                    err_msg = f"Anthropic API Error: {res.text}"
-                    log.error(err_msg)
-                    errors.append(err_msg)
-            except Exception as e:
-                err_msg = f"Anthropic Exception: {str(e)}"
-                log.warning(err_msg)
-                errors.append(err_msg)
-
-        # ─── Ollama (Local Fallback) ──────────────────────────────
-        try:
-            log.info("Falling back to local Ollama (moondream)...")
-            response = ollama.chat(
-                model="moondream",
-                messages=[{"role": "user", "content": body.question, "images": [clean_base64]}]
+        if selected_provider == "anthropic":
+            log.info(f"Anthropic vision ({body.model})...")
+            api_model = body.model if body.model else "claude-3-5-sonnet-20240620"
+            res = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": api_model, "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": clean_base64}},
+                        {"type": "text", "text": body.question}
+                    ]}]
+                },
+                timeout=60
             )
-            if response and 'message' in response:
-                return JSONResponse({"answer": response['message']['content']})
-        except Exception as e:
-            err_msg = f"Ollama Local Error: {str(e)}"
-            log.error(err_msg)
-            errors.append(err_msg)
+            if res.ok:
+                return JSONResponse({"answer": res.json()["content"][0]["text"]})
+            raise HTTPException(status_code=502, detail=f"Anthropic error: {res.text}")
 
-        # Final Error reporting
-        combined_errors = " | ".join(errors) if errors else "No API key provided and local Ollama not found."
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Image analysis failed. {combined_errors}"
-        )
-
-        # ─── Ollama (Local Fallback) ──────────────────────────────
-        log.info(f"Calling Ollama with model moondream... (Image size: {len(clean_base64)} chars)")
-        
+        # ─── Ollama (Local) ─────────────────────────────────────────
+        log.info("Ollama vision (moondream)...")
         response = ollama.chat(
             model="moondream",
-            messages=[
-                {
-                    "role": "user",
-                    "content": body.question,
-                    "images": [clean_base64]
-                }
-            ],
-            options={
-                "temperature": 0.2,
-            }
+            messages=[{"role": "user", "content": body.question, "images": [clean_base64]}]
         )
+        if response and 'message' in response:
+            return JSONResponse({"answer": response['message']['content']})
+        raise HTTPException(status_code=500, detail="Ollama returned an empty response.")
 
-        if "message" in response and "content" in response["message"]:
-            answer = response["message"]["content"]
-            log.info("Ollama analysis completed successfully.")
-            return JSONResponse({"answer": answer})
-        else:
-            log.error(f"Unexpected response from Ollama: {response}")
-            raise HTTPException(status_code=500, detail="Ollama returned an empty or malformed response.")
-
+    except HTTPException:
+        raise
     except Exception as e:
-        error_str = str(e)
-        log.error(f"Image analysis error: {error_str}")
-        # Return error in a field the frontend expects
-        gc.collect()
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Analysis Error: {error_str}", "detail": error_str}
-        )
+        log.error(f"Image analysis error: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Analysis Error: {str(e)}", "detail": str(e)})
 
 
 @app.delete("/clear-all")

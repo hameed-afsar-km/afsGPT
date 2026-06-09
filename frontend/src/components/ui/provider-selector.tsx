@@ -42,6 +42,8 @@ export function ProviderSelector() {
     const [isOpen, setIsOpen] = useState(false);
     const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
     const [selectedModel, setSelectedModel] = useState<string | null>(null);
+    const [appliedProvider, setAppliedProvider] = useState<string | null>(null);
+    const [appliedModel, setAppliedModel] = useState<string | null>(null);
     const [apiKey, setApiKey] = useState("");
     const [models, setModels] = useState<string[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -62,8 +64,8 @@ export function ProviderSelector() {
         const savedModel = localStorage.getItem("afs-model");
         const savedKeys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
 
-        if (savedProvider) setSelectedProvider(savedProvider);
-        if (savedModel) setSelectedModel(savedModel);
+        if (savedProvider) { setSelectedProvider(savedProvider); setAppliedProvider(savedProvider); }
+        if (savedModel) { setSelectedModel(savedModel); setAppliedModel(savedModel); }
         if (savedProvider && savedKeys[savedProvider]) {
             setApiKey(savedKeys[savedProvider]);
         }
@@ -143,10 +145,20 @@ export function ProviderSelector() {
     };
 
     const handleApply = () => {
-        if (selectedProvider) localStorage.setItem("afs-provider", selectedProvider);
+        if (selectedProvider) {
+            localStorage.setItem("afs-provider", selectedProvider);
+            setAppliedProvider(selectedProvider);
+        }
         if (selectedModel) {
             localStorage.setItem("afs-model", selectedModel);
+            setAppliedModel(selectedModel);
         }
+        setIsOpen(false);
+    };
+
+    const handleClose = () => {
+        setSelectedProvider(appliedProvider);
+        setSelectedModel(appliedModel);
         setIsOpen(false);
     };
 
@@ -159,7 +171,7 @@ export function ProviderSelector() {
         fetchModels();
     };
 
-    const activeProvider = providers.find(p => p.id === selectedProvider);
+    const activeProvider = providers.find(p => p.id === appliedProvider);
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredModels = selectedProvider === "ollama" && ollamaMode === "default" 
@@ -184,7 +196,7 @@ export function ProviderSelector() {
                     <>
                         <span className={activeProvider.color}>{activeProvider.icon}</span>
                         <span className="max-w-[120px] truncate">
-                            {activeProvider.name} • {selectedModel || "Select Model"}
+                            {activeProvider.name} • {appliedModel || "Select Model"}
                         </span>
                     </>
                 ) : (
@@ -206,8 +218,8 @@ export function ProviderSelector() {
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
-                                onClick={() => setIsOpen(false)}
-                                className="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998]"
+                                                    onClick={handleClose}
+                                                    className="fixed inset-0 bg-black/60 backdrop-blur-md z-[9998]"
                             />
 
                             {/* Modal Content */}
@@ -233,7 +245,7 @@ export function ProviderSelector() {
                                         </div>
                                     </div>
                                     <button 
-                                        onClick={() => setIsOpen(false)}
+                                        onClick={handleClose}
                                         className="p-2 hover:bg-white/5 rounded-xl text-white/30 hover:text-white transition-colors"
                                     >
                                         <ChevronDown className="w-6 h-6 rotate-90" />

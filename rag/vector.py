@@ -16,6 +16,7 @@ except ImportError:
 
 import gc
 import csv
+from typing import Optional
 try:
     from langchain_chroma import Chroma
 except ImportError:
@@ -33,16 +34,30 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 CHROMA_DIR = os.path.join(os.path.dirname(__file__), "chroma_db")
-EMBED_MODEL = "nomic-embed-text"          # pull with: ollama pull nomic-embed-text
-CHUNK_SIZE  = 1000
-CHUNK_OVERLAP = 150
+EMBED_MODEL = "all-minilm"                # pull with: ollama pull all-minilm
+CHUNK_SIZE  = 2000
+CHUNK_OVERLAP = 200
+
+# ─── Caches ───────────────────────────────────────────────────────────────────
+_embedding_cache: dict = {}
+_retriever_cache: dict = {}
+
+def _get_embedding_key(api_key: Optional[str] = None) -> str:
+    google_key = api_key or os.environ.get("GOOGLE_API_KEY")
+    return f"google:{google_key}" if google_key else "ollama"
 
 def get_embeddings(api_key: Optional[str] = None):
-    """Dynamically choose embeddings based on available keys."""
+    """Dynamically choose embeddings based on available keys. Cached."""
+    key = _get_embedding_key(api_key)
+    if key in _embedding_cache:
+        return _embedding_cache[key]
     google_key = api_key or os.environ.get("GOOGLE_API_KEY")
     if google_key:
-        return GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_key)
-    return OllamaEmbeddings(model=EMBED_MODEL)
+        emb = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_key)
+    else:
+        emb = OllamaEmbeddings(model=EMBED_MODEL)
+    _embedding_cache[key] = emb
+    return emb
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -68,6 +83,8 @@ def _load_pdf(path: str) -> list[Document]:
         return loader.load()
     except ImportError:
         raise ImportError("Install pypdf: pip install pypdf langchain-community")
+    except Exception as e:
+        raise ValueError(f"Failed to read PDF file: {e}")
 
 
 def _load_csv(path: str) -> list[Document]:
@@ -130,17 +147,26 @@ def ingest_file(path: str, collection_name: str = "rag_store", api_key: Optional
 
 
 def get_retriever(collection_name: str = "rag_store", k: int = 5, api_key: Optional[str] = None):
-    """Return a retriever over an existing ChromaDB collection."""
+    """Return a retriever over an existing ChromaDB collection. Cached per collection."""
+    cache_key = f"{collection_name}:{_get_embedding_key(api_key)}:{k}"
+    if cache_key in _retriever_cache:
+        return _retriever_cache[cache_key]
     db = Chroma(
         collection_name=collection_name,
         embedding_function=get_embeddings(api_key),
         persist_directory=CHROMA_DIR,
     )
-    return db.as_retriever(search_kwargs={"k": k})
+    retriever = db.as_retriever(search_kwargs={"k": k})
+    _retriever_cache[cache_key] = retriever
+    return retriever
 
 
 def clear_collection(collection_name: str = "rag_store"):
     """Wipe all documents from a collection (fresh session)."""
+    # Invalidate cache for this collection
+    keys_to_remove = [k for k in _retriever_cache if k.startswith(f"{collection_name}:")]
+    for k in keys_to_remove:
+        del _retriever_cache[k]
     db = Chroma(
         collection_name=collection_name,
         embedding_function=get_embeddings(), # Default is fine for deletion

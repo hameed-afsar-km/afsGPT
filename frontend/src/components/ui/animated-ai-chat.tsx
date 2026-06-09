@@ -223,9 +223,10 @@ export function AnimatedAIChat() {
   const [ragSessionId, setRagSessionId] = useState<string | null>(null);
   const [ragFileName, setRagFileName] = useState<string | null>(null);
   const [fileAttachedToNextMessage, setFileAttachedToNextMessage] = useState<
-    Array<{ name: string; thumbnail?: string }>
+    Array<{ name: string; thumbnail?: string; sessionId?: string }>
   >([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [processingSessions, setProcessingSessions] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Vision / LLaVA state ─────────────────────────────────────────────────
@@ -234,6 +235,7 @@ export function AnimatedAIChat() {
 
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [editImagePrefix, setEditImagePrefix] = useState("");
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<any>(null);
   const [isCheckingModel, setIsCheckingModel] = useState(false);
@@ -673,7 +675,7 @@ export function AnimatedAIChat() {
           }
           // ── End Image Generation ───────────────────────────────────
 
-          let responseContent: string;
+          let responseContent: string | undefined;
 
           if (isResearchMode) {
             // ── Research Agent mode ───────────────────────────
@@ -718,10 +720,17 @@ export function AnimatedAIChat() {
               }),
             });
             const ragData = await ragRes.json();
-            if (!ragRes.ok) {
+            if (ragData.status === "processing") {
+              // Still indexing — spinner stays visible, no response message
+            } else if (!ragRes.ok) {
               responseContent = `❌ RAG Error: ${ragData.detail || "Unknown error"}`;
             } else {
               responseContent = ragData.answer;
+              setProcessingSessions(prev => {
+                const next = new Set(prev);
+                if (ragSessionId) next.delete(ragSessionId);
+                return next;
+              });
             }
           } else {
             // ── Normal AI chat mode ───────────────────────────
@@ -755,6 +764,15 @@ export function AnimatedAIChat() {
             } else {
               responseContent = data.content;
             }
+          }
+
+          if (responseContent === undefined) {
+            if (chatId) {
+              setTypingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
+              setGeneratingChatIds(prev => { const n = new Set(prev); n.delete(chatId!); return n; });
+              abortControllersRef.current.delete(chatId);
+            }
+            return;
           }
 
           const aiMessage: any = {
@@ -852,13 +870,14 @@ export function AnimatedAIChat() {
 
   const uploadFilesToRAG = async (files: File[]) => {
     let currentSessionId = ragSessionId;
-    const newAttached: Array<{ name: string; thumbnail?: string }> = [];
+    const newAttached: Array<{ name: string; thumbnail?: string; sessionId?: string }> = [];
     setIsUploading(true);
 
-    // Get API keys from local storage to enable Cloud Direct Analysis on Render
     const provider = localStorage.getItem("afs-provider") || "gemini";
     const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
     const apiKey = keys[provider] || "";
+
+    const nextProcessing = new Set(processingSessions);
 
     for (const file of files) {
       const allowed = [".pdf", ".txt", ".csv", ".xlsx", ".xls"];
@@ -900,7 +919,10 @@ export function AnimatedAIChat() {
           setIsChatMode(true);
         } else {
           currentSessionId = data.session_id;
-          newAttached.push({ name: file.name, thumbnail: data.thumbnail });
+          newAttached.push({ name: file.name, thumbnail: data.thumbnail, sessionId: data.session_id });
+          if (data.processing) {
+            nextProcessing.add(data.session_id);
+          }
         }
       } catch (err: any) {
         const errMsg: any = {
@@ -913,6 +935,8 @@ export function AnimatedAIChat() {
         break;
       }
     }
+
+    setProcessingSessions(nextProcessing);
 
     if (currentSessionId) {
       setRagSessionId(currentSessionId);
@@ -1018,6 +1042,8 @@ export function AnimatedAIChat() {
         body: JSON.stringify({
           image_base64: imageBase64,
           question: question || "Describe this image in detail.",
+          provider: savedProvider,
+          model: savedModel,
           apiKey: apiKey,
         }),
       });
@@ -1060,6 +1086,7 @@ export function AnimatedAIChat() {
     setRagSessionId(null);
     setRagFileName(null);
     setFileAttachedToNextMessage([]);
+    setProcessingSessions(new Set());
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1454,6 +1481,7 @@ export function AnimatedAIChat() {
                             <div className="flex flex-wrap gap-2 mb-4">
                               {msg.attachments.map((att: string, i: number) => {
                                 const thumbnail = msg.thumbnails?.[i];
+                                const isProcessing = msg.role === "user" && processingSessions.size > 0;
                                 return (
                                   <div
                                     key={i}
@@ -1461,6 +1489,11 @@ export function AnimatedAIChat() {
                                   >
                                     {thumbnail && (
                                       <div className="relative w-32 aspect-[3/4] rounded-xl overflow-hidden bg-black/40 border border-white/10">
+                                        {isProcessing && (
+                                          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                                            <LoaderIcon className="w-6 h-6 text-violet-400 animate-spin" />
+                                          </div>
+                                        )}
                                         <img 
                                           src={thumbnail} 
                                           alt={att} 
@@ -1470,7 +1503,11 @@ export function AnimatedAIChat() {
                                       </div>
                                     )}
                                     <div className="flex items-center gap-2 px-2 py-1">
-                                      <FileText className="w-3.5 h-3.5 text-violet-300" />
+                                      {isProcessing ? (
+                                        <LoaderIcon className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                                      ) : (
+                                        <FileText className="w-3.5 h-3.5 text-violet-300" />
+                                      )}
                                       <span className="text-[10px] text-white/70 font-medium truncate max-w-[100px]">
                                         {att}
                                       </span>
@@ -1490,7 +1527,7 @@ export function AnimatedAIChat() {
                               />
                               <div className="flex justify-end gap-3">
                                 <button
-                                  onClick={() => setEditingMessageIndex(null)}
+                                  onClick={() => { setEditingMessageIndex(null); setEditImagePrefix(""); }}
                                   className="px-5 py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-white/60 transition-all border border-white/5"
                                 >
                                   Cancel
@@ -1498,7 +1535,9 @@ export function AnimatedAIChat() {
                                 <button
                                   onClick={() => {
                                     setEditingMessageIndex(null);
-                                    handleSendMessage(editValue, idx);
+                                    const finalText = editImagePrefix ? editImagePrefix + editValue : editValue;
+                                    setEditImagePrefix("");
+                                    handleSendMessage(finalText, idx);
                                   }}
                                   className="px-5 py-2 rounded-xl text-xs font-semibold bg-white text-black hover:bg-white/90 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)]"
                                 >
@@ -1733,7 +1772,17 @@ export function AnimatedAIChat() {
                           {msg.role === "user" && editingMessageIndex !== idx && (
                             <button
                               onClick={() => {
-                                setEditValue(msg.content);
+                                if (msg.content.startsWith("__IMAGE_UPLOAD__:")) {
+                                  const withoutPrefix = msg.content.replace("__IMAGE_UPLOAD__:", "");
+                                  const newlineIdx = withoutPrefix.indexOf("\n");
+                                  const imgSrc = newlineIdx !== -1 ? withoutPrefix.slice(0, newlineIdx) : withoutPrefix;
+                                  const question = newlineIdx !== -1 ? withoutPrefix.slice(newlineIdx + 1) : "";
+                                  setEditImagePrefix(`__IMAGE_UPLOAD__:${imgSrc}\n`);
+                                  setEditValue(question);
+                                } else {
+                                  setEditValue(msg.content);
+                                  setEditImagePrefix("");
+                                }
                                 setEditingMessageIndex(idx);
                               }}
                               className="p-1.5 rounded-full hover:bg-white/10 text-white/30 hover:text-white/70 transition-colors"
@@ -1743,7 +1792,7 @@ export function AnimatedAIChat() {
                             </button>
                           )}
                           <CopyButton 
-                            text={msg.content} 
+                            text={msg.content.startsWith("__IMAGE_UPLOAD__:") ? (() => { const wp = msg.content.replace("__IMAGE_UPLOAD__:", ""); const ni = wp.indexOf("\n"); return ni !== -1 ? wp.slice(ni + 1) : ""; })() : msg.content}
                             className="p-1.5 rounded-full hover:bg-white/10 text-white/30 hover:text-white/70"
                           />
                         </div>
@@ -1907,7 +1956,7 @@ export function AnimatedAIChat() {
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(fullscreenCode.code);
+                    try { navigator.clipboard.writeText(fullscreenCode.code); } catch {}
                     const btn = document.getElementById('modal-copy-btn');
                     if (btn) {
                       const toast = document.createElement('span');
@@ -2016,17 +2065,21 @@ export function AnimatedAIChat() {
                     Document context active
                   </motion.div>
                 )}
-                {fileAttachedToNextMessage.map((fileName, idx) => (
+                {fileAttachedToNextMessage.map((att, idx) => (
                   <motion.div
-                    key={`${fileName}-${idx}`}
+                    key={`${att.name}-${idx}`}
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 10 }}
                     className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-xs group transition-colors hover:bg-white/10"
                   >
-                    <FileText className="w-3.5 h-3.5 text-violet-400" />
+                    {processingSessions.has(att.sessionId ?? "") ? (
+                      <LoaderIcon className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5 text-violet-400" />
+                    )}
                     <span className="text-white/80 max-w-[150px] truncate font-medium">
-                      {fileName.name}
+                      {att.name}
                     </span>
                     <button
                       onClick={() => removeAttachment(idx)}
@@ -2411,7 +2464,7 @@ function CopyButton({ text, showLabel = false, className }: { text: string, show
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(text);
+    try { navigator.clipboard.writeText(text); } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -2526,7 +2579,7 @@ function CodeBlock({ className, children, chatTitle, onExpand, ...props }: any) 
   const language = match ? match[1] : "text";
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(String(children).replace(/\n$/, ""));
+    try { navigator.clipboard.writeText(String(children).replace(/\n$/, "")); } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

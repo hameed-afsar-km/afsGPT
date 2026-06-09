@@ -4,7 +4,8 @@ const RAG_SERVER = process.env.RAG_BACKEND_URL || "http://localhost:8001";
 
 export async function POST(req: NextRequest) {
     try {
-        let { message, provider, model, apiKey } = await req.json();
+        const { message, provider, model: rawModel, apiKey } = await req.json();
+        let model = rawModel;
 
         if (!provider || !model) {
             return NextResponse.json({ error: "Provider and model are required" }, { status: 400 });
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
             model = "gemma2:2b";
         }
 
-        const systemPrompt = "You are a helpful assistant. Provide a very short summary (maximum 3-4 words) for the following message, to be used as a chat title. Do NOT use quotes, just return the words.";
+        const systemPrompt = "You are a helpful assistant. Provide a very short title (maximum 4 words) for the following message, to be used as a chat title. Do NOT use quotes or punctuation, just return the words.";
         const messages = [
             { role: "system", content: systemPrompt },
             { role: "user", content: message }
