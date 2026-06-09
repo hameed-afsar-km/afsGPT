@@ -747,12 +747,13 @@ export function AnimatedAIChat() {
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = provider ? keys[provider] : "";
 
+            const sanitizedMessages = currentMessages.map((m: any) => ({ role: m.role, content: m.content }));
             const response = await fetch("/api/chat", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               signal: controller?.signal,
               body: JSON.stringify({
-                messages: currentMessages,
+                messages: sanitizedMessages,
                 provider,
                 model,
                 apiKey,

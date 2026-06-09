@@ -740,7 +740,8 @@ async def chat_handler(body: ChatRequest):
         "markdown code block with the appropriate language label. Always include a comment on the first line with the filename."
     )
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + body.messages
+    clean_messages = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in body.messages]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + clean_messages
 
     try:
         # Check online status first
