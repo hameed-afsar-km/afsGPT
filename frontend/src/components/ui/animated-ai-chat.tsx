@@ -723,31 +723,63 @@ export function AnimatedAIChat() {
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
             const apiKey = keys[provider] || "";
 
-            const ragRes = await fetch("/api/rag/query", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: controller?.signal,
-              body: JSON.stringify({
-                session_id: ragSessionId,
-                question: content,
-                provider,
-                model,
-                apiKey,
-                freeTier: useFreeTier,
-              }),
-            });
-            const ragData = await ragRes.json();
-            if (ragData.status === "processing") {
-              // Still indexing — spinner stays visible, no response message
-            } else if (!ragRes.ok) {
-              responseContent = `❌ RAG Error: ${ragData.detail || "Unknown error"}`;
-            } else {
-              responseContent = ragData.answer;
-              setProcessingSessions(prev => {
-                const next = new Set(prev);
-                if (ragSessionId) next.delete(ragSessionId);
-                return next;
-              });
+            try {
+              let ragRes: Response | undefined;
+              let ragData: any;
+              let retries = 0;
+              const MAX_RETRIES = 60;
+              while (retries < MAX_RETRIES) {
+                if (controller?.signal.aborted) break;
+                ragRes = await fetch("/api/rag/query", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  signal: controller?.signal,
+                  body: JSON.stringify({
+                    session_id: ragSessionId,
+                    question: content,
+                    provider,
+                    model,
+                    apiKey,
+                    freeTier: useFreeTier,
+                  }),
+                });
+                ragData = await ragRes.json();
+                if (ragData.status === "processing") {
+                  retries++;
+                  if (retries === 1) {
+                    const waitMsg: any = {
+                      role: "assistant",
+                      content: "_⏳ Indexing your document… automatically retrying when ready._",
+                      timestamp: new Date(),
+                      isNew: true,
+                    };
+                    setMessages((prev) => [...prev, waitMsg]);
+                    if (chatId) await sendMessageToFirestore(chatId, waitMsg);
+                  }
+                  await new Promise(r => setTimeout(r, 2000));
+                  continue;
+                }
+                break;
+              }
+              if (controller?.signal.aborted) {
+                // user cancelled — noop
+              } else if (ragData?.status === "processing") {
+                responseContent = `⏱️ Document indexing timed out after ${MAX_RETRIES * 2}s. Please try asking again in a moment.`;
+              } else if (!ragRes || !ragRes.ok) {
+                const detail = ragData?.detail || "Unknown error";
+                responseContent = `❌ RAG Error: ${detail}`;
+              } else {
+                responseContent = ragData.answer;
+                setProcessingSessions(prev => {
+                  const next = new Set(prev);
+                  if (ragSessionId) next.delete(ragSessionId);
+                  return next;
+                });
+              }
+            } catch (ragError: any) {
+              if (ragError.name === "AbortError") throw ragError;
+              console.error("RAG query fetch failed:", ragError);
+              responseContent = `❌ RAG query failed — the backend may not be running. Start the RAG server with: \`python rag/server.py\` (Error: ${ragError.message})`;
             }
           } else {
             // ── Normal AI chat mode ───────────────────────────

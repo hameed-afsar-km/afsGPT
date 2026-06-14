@@ -90,6 +90,7 @@ ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
 
 # Track background ingestion tasks so /query knows if a session is still processing
 _processing_sessions: dict = {}
+_ingestion_errors: dict = {}
 
 # Cache for PDF text extraction to avoid re-parsing on every query
 _pdf_text_cache: dict = {}
@@ -267,6 +268,7 @@ async def _ingest_in_background(session_id: str, save_path: str, api_key: Option
         log.info(f"[{session_id}] Background ingestion completed for '{filename}'.")
     except Exception as e:
         log.error(f"[{session_id}] Background ingestion failed: {e}")
+        _ingestion_errors[session_id] = str(e)
     finally:
         _processing_sessions.pop(session_id, None)
 
@@ -301,7 +303,8 @@ async def upload_file(
     # --- Conditional Ingestion (background if local mode) ---
     is_processing = False
     if apiKey:
-        log.info(f"[{session_id}] Cloud Mode detected. Skipping local ingestion.")
+        log.info(f"[{session_id}] Cloud Mode — keeping file for direct API analysis.")
+        # In cloud mode, keep ALL files on disk (not just PDFs) for direct analysis
     else:
         log.info(f"[{session_id}] Local Mode — spawning background ingestion...")
         _processing_sessions[session_id] = True
@@ -313,8 +316,8 @@ async def upload_file(
     if ext == ".pdf" and fitz:
         asyncio.create_task(_generate_thumbnail_async(save_path, session_id))
 
-    # Don't delete PDFs — direct_document_analysis needs them
-    if ext != ".pdf":
+    # In cloud mode, keep all files for direct analysis. Only delete non-PDFs in local mode.
+    if not apiKey and ext != ".pdf":
         if os.path.exists(save_path):
             os.remove(save_path)
 
@@ -323,145 +326,130 @@ async def upload_file(
         "filename":   file.filename,
         "thumbnail":  thumbnail_url,
         "processing": is_processing,
-        "message":    "File received. Analysis mode: Cloud Direct (No-DB)." if ".pdf" in file.filename.lower() else "File received. Background ingestion started."
+        "message":    "File received. Cloud mode — document will be sent directly to the AI."
     })
 
 
 async def direct_document_analysis(question: str, file_path: str, api_key: str, provider: str = "gemini", model_name: str = "gemini-2.5-flash"):
-    """Sends the document directly to the selected AI for analysis (No-DB RAG)."""
+    """Sends the document directly to the selected AI for analysis (No-DB RAG).
+    Supports PDF (native for Gemini/Anthropic) and TXT/CSV/XLSX (text extraction)."""
     try:
         provider = provider.lower() if provider else "gemini"
+        ext = os.path.splitext(file_path)[-1].lower()
+        is_pdf = ext == ".pdf"
+
+        # For non-PDFs, extract text upfront
+        file_text = None
+        if not is_pdf:
+            if ext == ".txt":
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    file_text = f.read()
+            elif ext == ".csv":
+                import csv
+                lines = []
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for row in csv.reader(f):
+                        lines.append(", ".join(row))
+                file_text = "\n".join(lines)
+            elif ext in (".xlsx", ".xls"):
+                file_text = "(Excel spreadsheet uploaded)"
+            file_text = (file_text or "")[:100000]  # cap at 100K chars
         
-        # --- Gemini Native PDF ---
+        # --- Gemini ---
         if provider == "gemini":
             if not new_genai:
                 return "Cloud analysis failed: google-genai SDK not installed."
             client = new_genai.Client(api_key=api_key)
-            with open(file_path, "rb") as f:
-                pdf_bytes = f.read()
-
             target_model = model_name if model_name else "gemini-2.5-flash"
-            response = client.models.generate_content(
-                model=target_model,
-                contents=[
-                    genai_types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
-                    question
-                ]
-            )
+
+            if is_pdf:
+                with open(file_path, "rb") as f:
+                    pdf_bytes = f.read()
+                response = client.models.generate_content(
+                    model=target_model,
+                    contents=[
+                        genai_types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
+                        question
+                    ]
+                )
+            else:
+                response = client.models.generate_content(
+                    model=target_model,
+                    contents=f"Document Content:\n{file_text}\n\nQuestion: {question}"
+                )
             return response.text
 
-        # --- Anthropic Native PDF ---
+        # --- Anthropic ---
         if provider == "anthropic":
-            with open(file_path, "rb") as f:
-                pdf_b64 = base64.b64encode(f.read()).decode("utf-8")
-            
             target_model = model_name if model_name else "claude-3-5-sonnet-20240620"
-            payload = {
-                "model": target_model,
-                "max_tokens": 1024,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "application/pdf",
-                                    "data": pdf_b64
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": question
-                            }
-                        ]
-                    }
+
+            if is_pdf:
+                with open(file_path, "rb") as f:
+                    pdf_b64 = base64.b64encode(f.read()).decode("utf-8")
+                content = [
+                    {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
+                    {"type": "text", "text": question}
                 ]
-            }
+            else:
+                content = f"Document Content:\n{file_text}\n\nQuestion: {question}"
+
+            payload = {"model": target_model, "max_tokens": 1024, "messages": [{"role": "user", "content": content}]}
             res = requests.post(
                 "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                },
-                json=payload,
-                timeout=120
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json=payload, timeout=120
             )
             if res.ok:
                 return res.json()["content"][0]["text"]
             return f"Anthropic error: {res.text}"
 
-        # --- OpenAI (In-Memory Text Extraction Fallback, with caching) ---
+        # --- OpenAI ---
         if provider == "openai":
-            full_text = _extract_pdf_text(file_path)
+            full_text = _extract_pdf_text(file_path) if is_pdf else file_text
             target_model = model_name if model_name else "gpt-4o-mini"
-            payload = {
-                "model": target_model,
-                "messages": [
-                    {"role": "system", "content": f"Document Text:\n{full_text}"},
-                    {"role": "user", "content": question}
-                ],
-                "max_tokens": 1000
-            }
+            payload = {"model": target_model, "messages": [
+                {"role": "system", "content": f"Document Content:\n{full_text}"},
+                {"role": "user", "content": question}
+            ], "max_tokens": 1000}
             res = requests.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=120
+                json=payload, timeout=120
             )
             if res.ok:
                 return res.json()["choices"][0]["message"]["content"]
             return f"OpenAI error: {res.text}"
 
-        # --- OpenRouter (In-Memory Text Extraction Fallback, with caching) ---
+        # --- OpenRouter ---
         if provider == "openrouter":
-            full_text = _extract_pdf_text(file_path)
+            full_text = _extract_pdf_text(file_path) if is_pdf else file_text
             target_model = model_name if model_name else "google/gemini-2.5-flash"
-            payload = {
-                "model": target_model,
-                "messages": [
-                    {"role": "system", "content": f"Document Text:\n{full_text}"},
-                    {"role": "user", "content": question}
-                ],
-                "max_tokens": 1000
-            }
+            payload = {"model": target_model, "messages": [
+                {"role": "system", "content": f"Document Content:\n{full_text}"},
+                {"role": "user", "content": question}
+            ], "max_tokens": 1000}
             res = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}", 
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:3000",
-                    "X-Title": "AfsGPT"
-                },
-                json=payload,
-                timeout=120
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+                         "HTTP-Referer": "http://localhost:3000", "X-Title": "AfsGPT"},
+                json=payload, timeout=120
             )
             if res.ok:
                 return res.json()["choices"][0]["message"]["content"]
             return f"OpenRouter error: {res.text}"
 
-        # --- Groq (In-Memory Text Extraction Fallback, with caching) ---
+        # --- Groq ---
         if provider == "groq":
-            full_text = _extract_pdf_text(file_path)
+            full_text = _extract_pdf_text(file_path) if is_pdf else file_text
             target_model = model_name if model_name else "llama3-70b-8192"
-            payload = {
-                "model": target_model,
-                "messages": [
-                    {"role": "system", "content": f"Document Text:\n{full_text}"},
-                    {"role": "user", "content": question}
-                ],
-                "max_tokens": 1000
-            }
+            payload = {"model": target_model, "messages": [
+                {"role": "system", "content": f"Document Content:\n{full_text}"},
+                {"role": "user", "content": question}
+            ], "max_tokens": 1000}
             res = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
-                json=payload,
-                timeout=120
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload, timeout=120
             )
             if res.ok:
                 return res.json()["choices"][0]["message"]["content"]
@@ -490,7 +478,7 @@ async def ask_question(body: QueryRequest):
             status_code=202
         )
 
-    # ─── Direct Document Logic (Cloud / No-DB for PDFs) ────────────────────
+    # ─── Direct Document Logic (Cloud / No-DB for any file type) ────────
     provider = body.provider.lower() if body.provider else "gemini"
     model = body.model
     api_key = resolve_api_key(provider, body.apiKey)
@@ -500,7 +488,7 @@ async def ask_question(body: QueryRequest):
         provider, model, api_key = resolve_free_tier_provider(provider, model, body.apiKey)
 
     if api_key and body.session_id:
-        potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id) and f.lower().endswith(".pdf")]
+        potential_files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(body.session_id)]
         if potential_files:
             if not is_online():
                 raise HTTPException(
@@ -549,10 +537,25 @@ async def clear_session(body: ClearRequest):
         # Lazy import
         from vector import clear_collection
         clear_collection(collection_name=body.session_id)
+        _processing_sessions.pop(body.session_id, None)
+        _ingestion_errors.pop(body.session_id, None)
         log.info(f"[{body.session_id}] Collection cleared.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return JSONResponse({"message": "Session cleared."})
+
+
+@app.get("/status/{session_id}")
+async def ingestion_status(session_id: str):
+    """Check whether ingestion is still in progress for a session."""
+    processing = session_id in _processing_sessions
+    error = _ingestion_errors.get(session_id)
+    return JSONResponse({
+        "session_id": session_id,
+        "processing": processing,
+        "ready": not processing and not error,
+        "error": error,
+    })
 
 
 @app.post("/research")

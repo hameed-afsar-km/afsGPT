@@ -35,8 +35,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # ─── Config ───────────────────────────────────────────────────────────────────
 CHROMA_DIR = os.path.join(os.path.dirname(__file__), "chroma_db")
 EMBED_MODEL = "all-minilm"                # pull with: ollama pull all-minilm
-CHUNK_SIZE  = 2000
-CHUNK_OVERLAP = 200
+CHUNK_SIZE  = 5000
+CHUNK_OVERLAP = 500
 
 # ─── Caches ───────────────────────────────────────────────────────────────────
 _embedding_cache: dict = {}
@@ -45,6 +45,30 @@ _retriever_cache: dict = {}
 def _get_embedding_key(api_key: Optional[str] = None) -> str:
     google_key = api_key or os.environ.get("GOOGLE_API_KEY")
     return f"google:{google_key}" if google_key else "ollama"
+
+def _ensure_ollama_model(model: str) -> None:
+    """Check if an Ollama model is available; pull it if not."""
+    import requests as req
+    OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    try:
+        resp = req.get(f"{OLLAMA_HOST}/api/tags", timeout=3)
+        if resp.ok:
+            installed = [m["name"] for m in resp.json().get("models", [])]
+            # Ollama may return "all-minilm:latest" or "all-minilm"
+            if any(model in m for m in installed):
+                return
+        # Model not found — pull it
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(f"Ollama model '{model}' not found. Pulling (this may take a moment)...")
+        pull_resp = req.post(f"{OLLAMA_HOST}/api/pull", json={"name": model}, timeout=300)
+        if pull_resp.ok:
+            log.info(f"Successfully pulled Ollama model '{model}'.")
+        else:
+            log.warning(f"Failed to pull '{model}': {pull_resp.status_code} {pull_resp.text}")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Could not verify/pull Ollama model '{model}': {e}")
 
 def get_embeddings(api_key: Optional[str] = None):
     """Dynamically choose embeddings based on available keys. Cached."""
@@ -55,6 +79,7 @@ def get_embeddings(api_key: Optional[str] = None):
     if google_key:
         emb = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_key)
     else:
+        _ensure_ollama_model(EMBED_MODEL)
         emb = OllamaEmbeddings(model=EMBED_MODEL)
     _embedding_cache[key] = emb
     return emb
@@ -124,6 +149,9 @@ def ingest_file(path: str, collection_name: str = "rag_store", api_key: Optional
     Load, chunk, embed, and persist a file into ChromaDB.
     Returns the Chroma vector store.
     """
+    import logging
+    log = logging.getLogger(__name__)
+    log.info(f"[{collection_name}] Loading file: {path}")
     docs   = load_file(path)
     # Ensure there is actually some text in the documents
     docs = [d for d in docs if d.page_content.strip()]
@@ -136,12 +164,14 @@ def ingest_file(path: str, collection_name: str = "rag_store", api_key: Optional
         # Fallback: Use the original documents if they couldn't be split
         chunks = docs
 
+    log.info(f"[{collection_name}] Loaded {len(docs)} page(s), split into {len(chunks)} chunk(s). Embedding with {_get_embedding_key(api_key)}...")
     db = Chroma(
         collection_name=collection_name,
         embedding_function=get_embeddings(api_key),
         persist_directory=CHROMA_DIR,
     )
     db.add_documents(chunks)
+    log.info(f"[{collection_name}] Ingestion complete — {len(chunks)} chunks persisted to ChromaDB.")
     gc.collect() # Force cleanup
     return db
 

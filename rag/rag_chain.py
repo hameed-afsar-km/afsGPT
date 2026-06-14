@@ -8,7 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from vector import get_retriever
+from vector import get_retriever, _ensure_ollama_model
 
 from typing import Optional
 
@@ -31,6 +31,7 @@ def get_llm(api_key: Optional[str] = None):
     if google_key:
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_key)
     else:
+        _ensure_ollama_model(LLM_MODEL)
         llm = OllamaLLM(model=LLM_MODEL)
     _llm_cache[key] = llm
     return llm
