@@ -388,6 +388,41 @@ export function AnimatedAIChat() {
     };
   }, []);
 
+  // Poll processing sessions until ready
+  useEffect(() => {
+    if (processingSessions.size === 0) return;
+    const intervals = new Map<string, ReturnType<typeof setInterval>>();
+    for (const sid of processingSessions) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/rag/status/${sid}`);
+          const data = await res.json();
+          if (data.ready || data.error) {
+            clearInterval(interval);
+            intervals.delete(sid);
+            setProcessingSessions(prev => {
+              const next = new Set(prev);
+              next.delete(sid);
+              return next;
+            });
+            // Update attachment with thumbnail if available
+            if (data.thumbnail) {
+              setFileAttachedToNextMessage(prev =>
+                prev.map(att =>
+                  att.sessionId === sid ? { ...att, thumbnail: data.thumbnail } : att
+                )
+              );
+            }
+          }
+        } catch { /* ignore polling errors */ }
+      }, 2000);
+      intervals.set(sid, interval);
+    }
+    return () => {
+      for (const interval of intervals.values()) clearInterval(interval);
+    };
+  }, [processingSessions]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showCommandPalette) {
       if (e.key === "ArrowDown") {
@@ -1544,37 +1579,27 @@ export function AnimatedAIChat() {
                             <div className="flex flex-wrap gap-2 mb-4">
                               {msg.attachments.map((att: string, i: number) => {
                                 const thumbnail = msg.thumbnails?.[i];
-                                const isProcessing = msg.role === "user" && processingSessions.size > 0;
                                 return (
                                   <div
                                     key={i}
-                                    className="flex flex-col gap-2 p-1.5 bg-white/5 rounded-2xl border border-white/10 group/att"
+                                    className="flex flex-col gap-1 p-1 bg-white/5 rounded-xl border border-white/10 group/att"
                                   >
-                                    {thumbnail && (
-                                      <div className="relative w-32 aspect-[3/4] rounded-xl overflow-hidden bg-black/40 border border-white/10">
-                                        {isProcessing && (
-                                          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                                            <LoaderIcon className="w-6 h-6 text-violet-400 animate-spin" />
-                                          </div>
-                                        )}
+                                    {thumbnail ? (
+                                      <div className="w-16 h-16 rounded-lg overflow-hidden bg-black/30 border border-white/10 p-0.5">
                                         <img 
                                           src={thumbnail} 
                                           alt={att} 
-                                          className="w-full h-full object-cover transition-transform group-hover/att:scale-105" 
+                                          className="w-full h-full object-contain rounded-md" 
                                         />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                                      </div>
+                                    ) : (
+                                      <div className="w-10 h-10 flex items-center justify-center">
+                                        <FileText className="w-5 h-5 text-violet-400" />
                                       </div>
                                     )}
-                                    <div className="flex items-center gap-2 px-2 py-1">
-                                      {isProcessing ? (
-                                        <LoaderIcon className="w-3.5 h-3.5 text-violet-400 animate-spin" />
-                                      ) : (
-                                        <FileText className="w-3.5 h-3.5 text-violet-300" />
-                                      )}
-                                      <span className="text-[10px] text-white/70 font-medium truncate max-w-[100px]">
-                                        {att}
-                                      </span>
-                                    </div>
+                                    <span className="text-[9px] text-white/50 font-medium truncate max-w-[70px] text-center px-1">
+                                      {att}
+                                    </span>
                                   </div>
                                 );
                               })}
@@ -2137,11 +2162,19 @@ export function AnimatedAIChat() {
                     className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-xs group transition-colors hover:bg-white/10"
                   >
                     {processingSessions.has(att.sessionId ?? "") ? (
-                      <LoaderIcon className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full border-2 border-violet-400/30 border-t-violet-400 animate-spin" />
+                        <span className="text-violet-400/70 text-[10px] font-medium">Indexing...</span>
+                      </div>
+                    ) : att.thumbnail ? (
+                      <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 flex-shrink-0 bg-black/30 p-0.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={att.thumbnail} alt={att.name} className="w-full h-full object-contain rounded-md" />
+                      </div>
                     ) : (
-                      <FileText className="w-3.5 h-3.5 text-violet-400" />
+                      <FileText className="w-4 h-4 text-violet-400" />
                     )}
-                    <span className="text-white/80 max-w-[150px] truncate font-medium">
+                    <span className="text-white/80 max-w-[120px] truncate font-medium">
                       {att.name}
                     </span>
                     <button

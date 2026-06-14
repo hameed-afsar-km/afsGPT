@@ -236,26 +236,27 @@ def health_check():
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
-async def _generate_thumbnail_async(save_path: str, session_id: str):
-    """Generate PDF thumbnail in background thread — non-blocking."""
+_thumbnail_urls: dict = {}
+
+def _generate_thumbnail_sync(save_path: str, session_id: str) -> str | None:
+    """Generate PDF thumbnail and return its URL path, or None."""
     if not fitz:
-        return
+        return None
     try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _generate_thumbnail_sync, save_path, session_id)
+        thumb_filename = f"thumb_{session_id}.png"
+        thumb_path = os.path.join(THUMBNAILS_DIR, thumb_filename)
+        doc_pdf = fitz.open(save_path)
+        if len(doc_pdf) > 0:
+            page = doc_pdf[0]
+            pix = page.get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
+            pix.save(thumb_path)
+        doc_pdf.close()
+        thumb_url = f"/static/thumbnails/{thumb_filename}"
+        _thumbnail_urls[session_id] = thumb_url
+        return thumb_url
     except Exception as te:
         log.warning(f"[{session_id}] Thumbnail generation failed: {te}")
-
-
-def _generate_thumbnail_sync(save_path: str, session_id: str):
-    thumb_filename = f"thumb_{session_id}_{uuid.uuid4().hex[:8]}.png"
-    thumb_path = os.path.join(THUMBNAILS_DIR, thumb_filename)
-    doc_pdf = fitz.open(save_path)
-    if len(doc_pdf) > 0:
-        page = doc_pdf[0]
-        pix = page.get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
-        pix.save(thumb_path)
-    doc_pdf.close()
+        return None
 
 
 async def _ingest_in_background(session_id: str, save_path: str, api_key: Optional[str], filename: str):
@@ -311,10 +312,8 @@ async def upload_file(
         is_processing = True
         asyncio.create_task(_ingest_in_background(session_id, save_path, apiKey, file.filename))
 
-    # Generate thumbnail in background so upload returns immediately
-    thumbnail_url = None
-    if ext == ".pdf" and fitz:
-        asyncio.create_task(_generate_thumbnail_async(save_path, session_id))
+    # Generate thumbnail synchronously for PDFs so we can return the URL
+    thumbnail_url = _generate_thumbnail_sync(save_path, session_id) if ext == ".pdf" else None
 
     # In cloud mode, keep all files for direct analysis. Only delete non-PDFs in local mode.
     if not apiKey and ext != ".pdf":
@@ -550,11 +549,13 @@ async def ingestion_status(session_id: str):
     """Check whether ingestion is still in progress for a session."""
     processing = session_id in _processing_sessions
     error = _ingestion_errors.get(session_id)
+    thumbnail = _thumbnail_urls.get(session_id)
     return JSONResponse({
         "session_id": session_id,
         "processing": processing,
         "ready": not processing and not error,
         "error": error,
+        "thumbnail": thumbnail,
     })
 
 
