@@ -18,6 +18,7 @@ ollama
 ddgs
 python-dotenv
 faster-whisper
+python-docx
 httpx
 numpy
 websockets

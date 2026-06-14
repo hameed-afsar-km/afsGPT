@@ -127,6 +127,18 @@ def _load_xlsx(path: str) -> list[Document]:
     return [Document(page_content="Excel processing disabled to save memory.", metadata={"source": os.path.basename(path)})]
 
 
+def _load_docx(path: str) -> list[Document]:
+    try:
+        import docx
+        doc = docx.Document(path)
+        text = "\n".join(p.text for p in doc.paragraphs)
+        return [Document(page_content=text, metadata={"source": os.path.basename(path)})]
+    except ImportError:
+        raise ImportError("Install python-docx: pip install python-docx")
+    except Exception as e:
+        raise ValueError(f"Failed to read DOCX file: {e}")
+
+
 def load_file(path: str) -> list[Document]:
     """Detect file type and return a list of Documents."""
     ext = os.path.splitext(path)[-1].lower()
@@ -136,6 +148,7 @@ def load_file(path: str) -> list[Document]:
         ".csv":  _load_csv,
         ".xlsx": _load_xlsx,
         ".xls":  _load_xlsx,
+        ".docx": _load_docx,
     }
     if ext not in loaders:
         raise ValueError(f"Unsupported file type: {ext}")

@@ -86,7 +86,7 @@ for d in [UPLOAD_DIR, STATIC_DIR, IMAGES_DIR, THUMBNAILS_DIR]:
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls"}
+ALLOWED_EXT = {".txt", ".pdf", ".csv", ".xlsx", ".xls", ".docx"}
 
 # Track background ingestion tasks so /query knows if a session is still processing
 _processing_sessions: dict = {}
@@ -331,7 +331,7 @@ async def upload_file(
 
 async def direct_document_analysis(question: str, file_path: str, api_key: str, provider: str = "gemini", model_name: str = "gemini-2.5-flash"):
     """Sends the document directly to the selected AI for analysis (No-DB RAG).
-    Supports PDF (native for Gemini/Anthropic) and TXT/CSV/XLSX (text extraction)."""
+    Supports PDF (native for Gemini/Anthropic) and TXT/CSV/XLSX/DOCX (text extraction)."""
     try:
         provider = provider.lower() if provider else "gemini"
         ext = os.path.splitext(file_path)[-1].lower()
@@ -352,6 +352,13 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
                 file_text = "\n".join(lines)
             elif ext in (".xlsx", ".xls"):
                 file_text = "(Excel spreadsheet uploaded)"
+            elif ext == ".docx":
+                try:
+                    import docx
+                    doc = docx.Document(file_path)
+                    file_text = "\n".join(p.text for p in doc.paragraphs)
+                except ImportError:
+                    file_text = "(DOCX file uploaded — install python-docx for text extraction)"
             file_text = (file_text or "")[:100000]  # cap at 100K chars
         
         # --- Gemini ---

@@ -265,6 +265,7 @@ export function AnimatedAIChat() {
   const getDateKey = () => new Date().toISOString().split("T")[0];
 
   const getUploadCountToday = (): number => {
+    if (typeof window === "undefined") return 0;
     const date = localStorage.getItem("afs-upload-date");
     const today = getDateKey();
     if (date !== today) { localStorage.setItem("afs-upload-date", today); localStorage.setItem("afs-upload-count", "0"); return 0; }
@@ -273,12 +274,18 @@ export function AnimatedAIChat() {
   const incrementUploadCount = (n = 1) => {
     const current = getUploadCountToday();
     localStorage.setItem("afs-upload-count", String(current + n));
+    setUploadsRemaining(Math.max(0, 5 - (current + n)));
   };
 
-  const uploadsRemaining = Math.max(0, 5 - getUploadCountToday());
+  const [uploadsRemaining, setUploadsRemaining] = useState(5);
   const uploadLimitReached = uploadsRemaining <= 0;
 
+  useEffect(() => {
+    setUploadsRemaining(Math.max(0, 5 - getUploadCountToday()));
+  }, []);
+
   const getProviderMsgCounts = (): Record<string, number> => {
+    if (typeof window === "undefined") return {};
     const date = localStorage.getItem("afs-msg-date");
     const today = getDateKey();
     if (date !== today) { localStorage.setItem("afs-msg-date", today); localStorage.setItem("afs-msg-counts", "{}"); return {}; }
@@ -1078,7 +1085,7 @@ export function AnimatedAIChat() {
     const nextProcessing = new Set(processingSessions);
 
     for (const file of allowedFiles) {
-      const allowed = [".pdf", ".txt", ".csv", ".xlsx", ".xls"];
+      const allowed = [".pdf", ".txt", ".csv", ".xlsx", ".xls", ".docx"];
       const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
       if (!allowed.includes(ext)) {
         const errMsg: any = {
@@ -1156,11 +1163,7 @@ export function AnimatedAIChat() {
     fileInputRef.current?.click();
   };
 
-  const handleImageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Optimize: Resize image before sending to speed up analysis
+  const readImageFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
@@ -1187,14 +1190,22 @@ export function AnimatedAIChat() {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx?.drawImage(img, 0, 0, width, height);
-        
-        // Use compressed JPEG for faster transfer and processing
+
         const base64 = canvas.toDataURL("image/jpeg", 0.7);
         setAttachedImage({ base64, name: file.name });
       };
       img.src = ev.target?.result as string;
     };
     reader.readAsDataURL(file);
+  };
+
+  const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+  const isImageFile = (name: string) => IMAGE_EXTS.includes(name.slice(name.lastIndexOf(".")).toLowerCase());
+
+  const handleImageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    readImageFile(file);
     e.target.value = "";
   };
 
@@ -1304,12 +1315,53 @@ export function AnimatedAIChat() {
     setIsDragging(false);
   };
 
+  const RAG_EXTS = [".pdf", ".docx", ".txt", ".csv", ".xlsx", ".xls"];
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) uploadFilesToRAG(Array.from(files));
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+
+    const ragFiles: File[] = [];
+    const imageFiles: File[] = [];
+    const rejected: string[] = [];
+
+    for (const f of files) {
+      const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
+      if (RAG_EXTS.includes(ext)) ragFiles.push(f);
+      else if (isImageFile(f.name)) imageFiles.push(f);
+      else rejected.push(f.name);
+    }
+
+    if (ragFiles.length > 0) {
+      if (uploadLimitReached) {
+        const errMsg: any = {
+          role: "assistant",
+          content: `⚠️ You've reached the daily limit of **5 document uploads**. Please try again tomorrow.`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, errMsg]);
+        setIsChatMode(true);
+      } else {
+        uploadFilesToRAG(ragFiles);
+      }
+    }
+
+    for (const imgFile of imageFiles) {
+      readImageFile(imgFile);
+    }
+
+    if (rejected.length > 0) {
+      const errMsg: any = {
+        role: "assistant",
+        content: `⚠️ Unsupported file type${rejected.length > 1 ? "s" : ""}: **${rejected.join(", ")}**. Only documents (PDF, DOCX, TXT, CSV, XLSX) and images (PNG, JPG, JPEG, GIF, WEBP) are supported.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errMsg]);
+      setIsChatMode(true);
+    }
   };
 
   const removeAttachment = (index: number) => {
@@ -1492,7 +1544,7 @@ export function AnimatedAIChat() {
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.txt,.csv,.xlsx,.xls"
+        accept=".pdf,.txt,.csv,.xlsx,.xls,.docx"
         className="hidden"
         onChange={handleFileInputChange}
       />
@@ -1527,8 +1579,17 @@ export function AnimatedAIChat() {
                 Drop document to analyze
               </h3>
               <p className="text-violet-400/60 font-medium">
-                Supports PDF, TXT, CSV, XLSX
+                Supports PDF, DOCX, TXT, CSV, XLSX
               </p>
+              <span className={cn(
+                "text-xs font-semibold px-2 py-0.5 rounded-full mt-1",
+                uploadsRemaining > 0 && uploadsRemaining > 3 ? "text-emerald-400 bg-emerald-500/10" :
+                uploadsRemaining > 0 && uploadsRemaining > 1 ? "text-amber-400 bg-amber-500/10" :
+                uploadsRemaining > 0 ? "text-rose-400 bg-rose-500/10" :
+                "text-rose-400 bg-rose-500/10"
+              )}>
+                {uploadsRemaining > 0 ? `${uploadsRemaining} / 5 remaining today` : "Daily limit reached"}
+              </span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -2438,20 +2499,32 @@ export function AnimatedAIChat() {
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute bottom-full left-0 mb-3 w-48 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden p-1.5 z-50"
+                    className="absolute bottom-full left-0 mb-3 w-60 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden p-1.5 z-50"
                   >
                     <button
                       onClick={() => { handleAttachFile(); setShowAttachMenu(false); }}
                       disabled={uploadLimitReached}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all",
+                        "w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium transition-all",
                         uploadLimitReached
                           ? "text-white/20 cursor-not-allowed"
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
-                      <FileText className="w-4 h-4 text-violet-400" />
-                      <span>{uploadLimitReached ? "Daily limit reached" : `Attach Document (${uploadsRemaining}/5 left)`}</span>
+                      <FileText className="w-4 h-4 shrink-0 text-violet-400" />
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <span className="truncate">{uploadLimitReached ? "Daily limit reached" : "Upload Document"}</span>
+                        {!uploadLimitReached && (
+                          <span className={cn(
+                            "text-[10px] font-semibold px-1.5 py-0.5 rounded-full self-start",
+                            uploadsRemaining > 3 ? "text-emerald-400 bg-emerald-500/10" :
+                            uploadsRemaining > 1 ? "text-amber-400 bg-amber-500/10" :
+                            "text-rose-400 bg-rose-500/10"
+                          )}>
+                            {uploadsRemaining} / 5 remaining
+                          </span>
+                        )}
+                      </div>
                     </button>
                     <button
                       onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}
