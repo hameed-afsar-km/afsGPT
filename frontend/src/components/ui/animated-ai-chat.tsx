@@ -1338,7 +1338,7 @@ export function AnimatedAIChat() {
       if (uploadLimitReached) {
         const errMsg: any = {
           role: "assistant",
-          content: `⚠️ You've reached the daily limit of **5 document uploads**. Please try again tomorrow.`,
+        content: `⚠️ You've reached the daily limit of **5 document uploads**. Please try again tomorrow.`,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errMsg]);
