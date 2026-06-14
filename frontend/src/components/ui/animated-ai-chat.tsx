@@ -252,6 +252,56 @@ export function AnimatedAIChat() {
     localStorage.setItem("afs-free-tier", String(useFreeTier));
   }, [useFreeTier]);
 
+  // ── Daily limits (uploads + provider messages) ─────────────────────────
+  const PROVIDERS_FALLBACK_ORDER = ["gemini", "groq", "openai", "anthropic", "openrouter"] as const;
+  const FALLBACK_MODELS: Record<string, string> = {
+    gemini: "gemini-1.5-flash",
+    groq: "mixtral-8x7b-32768",
+    openai: "gpt-4o-mini",
+    anthropic: "claude-3-haiku-20240307",
+    openrouter: "meta-llama/llama-3.1-8b-instruct",
+  };
+
+  const getDateKey = () => new Date().toISOString().split("T")[0];
+
+  const getUploadCountToday = (): number => {
+    const date = localStorage.getItem("afs-upload-date");
+    const today = getDateKey();
+    if (date !== today) { localStorage.setItem("afs-upload-date", today); localStorage.setItem("afs-upload-count", "0"); return 0; }
+    return parseInt(localStorage.getItem("afs-upload-count") || "0", 10);
+  };
+  const incrementUploadCount = (n = 1) => {
+    const current = getUploadCountToday();
+    localStorage.setItem("afs-upload-count", String(current + n));
+  };
+
+  const uploadsRemaining = Math.max(0, 5 - getUploadCountToday());
+  const uploadLimitReached = uploadsRemaining <= 0;
+
+  const getProviderMsgCounts = (): Record<string, number> => {
+    const date = localStorage.getItem("afs-msg-date");
+    const today = getDateKey();
+    if (date !== today) { localStorage.setItem("afs-msg-date", today); localStorage.setItem("afs-msg-counts", "{}"); return {}; }
+    try { return JSON.parse(localStorage.getItem("afs-msg-counts") || "{}"); } catch { return {}; }
+  };
+  const incrementProviderMsgCount = (provider: string) => {
+    const counts = getProviderMsgCounts();
+    counts[provider] = (counts[provider] || 0) + 1;
+    localStorage.setItem("afs-msg-counts", JSON.stringify(counts));
+  };
+  const canUseProvider = (provider: string): boolean => {
+    const counts = getProviderMsgCounts();
+    return (counts[provider] || 0) < 5;
+  };
+
+  const RETRIABLE_ERRORS = [
+    "429", "high demand", "rate limit", "rate_limit", "resource exhausted",
+    "insufficient_quota", "overloaded", "too many requests", "unavailable",
+    "too high for the model",
+  ];
+  const isRetriableError = (msg: string): boolean =>
+    RETRIABLE_ERRORS.some(pattern => msg.toLowerCase().includes(pattern.toLowerCase()));
+
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<any>(null);
   const [isCheckingModel, setIsCheckingModel] = useState(false);
@@ -818,18 +868,13 @@ export function AnimatedAIChat() {
             }
           } else {
             // ── Normal AI chat mode ───────────────────────────
-            const provider = localStorage.getItem("afs-provider");
+            const primaryProvider = localStorage.getItem("afs-provider") || "gemini";
             const rawModel = localStorage.getItem("afs-model");
             const isDefault = rawModel === "Use default models (Qwen 1.5B + Gemma 2B + Moondream)";
             const codeKeywords = ["code", "function", "script", "python", "javascript", "react", "html", "css", "bug", "debug", "api"];
             const isCodeRelated = content.toLowerCase().split(/\s+/).some(word => codeKeywords.includes(word));
             
-            let model = rawModel;
-            if (isDefault) {
-              model = isCodeRelated ? "qwen2.5-coder:1.5b" : "gemma2:2b";
-            }
             const keys = JSON.parse(localStorage.getItem("afs-keys") || "{}");
-            const apiKey = provider ? keys[provider] : "";
 
             const sanitizedMessages = currentMessages.map((m: any) => {
               let content = m.content;
@@ -839,23 +884,67 @@ export function AnimatedAIChat() {
               }
               return { role: m.role, content };
             });
-            const response = await fetch("/api/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: controller?.signal,
-              body: JSON.stringify({
-                messages: sanitizedMessages,
-                provider,
-                model,
-                apiKey: useFreeTier ? "" : apiKey,
-                freeTier: useFreeTier,
-              }),
-            });
-            const data = await response.json();
-            if (data.error) {
-              responseContent = `Error: ${data.error}`;
-            } else {
-              responseContent = data.content;
+
+            // Build fallback chain: primary first, then others with capacity
+            const fallbackChain = [primaryProvider];
+            for (const p of PROVIDERS_FALLBACK_ORDER) {
+              if (p !== primaryProvider && canUseProvider(p) && keys[p]) fallbackChain.push(p);
+            }
+
+            let lastError = "";
+            let usedProvider = "";
+            for (const p of fallbackChain) {
+              if (controller?.signal.aborted) break;
+              if (!canUseProvider(p)) { lastError = `${p} daily limit reached`; continue; }
+              if (p !== primaryProvider && !keys[p]) { lastError = `${p} key missing`; continue; }
+
+              const model = p === primaryProvider
+                ? (isDefault ? (isCodeRelated ? "qwen2.5-coder:1.5b" : "gemma2:2b") : rawModel)
+                : FALLBACK_MODELS[p] || FALLBACK_MODELS[primaryProvider];
+
+              const apiKey = useFreeTier ? "" : (keys[p] || "");
+
+              try {
+                const res = await fetch("/api/chat", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  signal: controller?.signal,
+                  body: JSON.stringify({
+                    messages: sanitizedMessages,
+                    provider: p,
+                    model,
+                    apiKey,
+                    freeTier: useFreeTier,
+                  }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                  lastError = data.error;
+                  if (isRetriableError(data.error)) continue;
+                  // Non-retriable: stop trying
+                  usedProvider = p;
+                  responseContent = `Error: ${data.error}`;
+                  break;
+                }
+                responseContent = data.content;
+                usedProvider = p;
+                incrementProviderMsgCount(p);
+                // Append fallback note if different from primary
+                if (p !== primaryProvider) {
+                  responseContent += `\n\n*(via ${p.charAt(0).toUpperCase() + p.slice(1)})*`;
+                }
+                break;
+              } catch (fetchErr: any) {
+                if (fetchErr.name === "AbortError") throw fetchErr;
+                lastError = fetchErr.message;
+                continue;
+              }
+            }
+
+            if (!responseContent && lastError) {
+              responseContent = `❌ ${lastError}`;
+            } else if (!responseContent) {
+              responseContent = "❌ All providers failed. Please check your API keys.";
             }
           }
 
@@ -962,6 +1051,22 @@ export function AnimatedAIChat() {
   };
 
   const uploadFilesToRAG = async (files: File[]) => {
+    const count = getUploadCountToday();
+    const remaining = 5 - count;
+    if (remaining <= 0) {
+      const errMsg: any = {
+        role: "assistant",
+        content: `⚠️ You've reached the daily limit of **5 document uploads**. Please try again tomorrow.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errMsg]);
+      setIsChatMode(true);
+      return;
+    }
+
+    // Only allow up to remaining files
+    const allowedFiles = files.slice(0, remaining);
+
     let currentSessionId = ragSessionId;
     const newAttached: Array<{ name: string; thumbnail?: string; sessionId?: string }> = [];
     setIsUploading(true);
@@ -972,7 +1077,7 @@ export function AnimatedAIChat() {
 
     const nextProcessing = new Set(processingSessions);
 
-    for (const file of files) {
+    for (const file of allowedFiles) {
       const allowed = [".pdf", ".txt", ".csv", ".xlsx", ".xls"];
       const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
       if (!allowed.includes(ext)) {
@@ -1030,6 +1135,10 @@ export function AnimatedAIChat() {
     }
 
     setProcessingSessions(nextProcessing);
+
+    if (newAttached.length > 0) {
+      incrementUploadCount(newAttached.length);
+    }
 
     if (currentSessionId) {
       setRagSessionId(currentSessionId);
@@ -2333,10 +2442,16 @@ export function AnimatedAIChat() {
                   >
                     <button
                       onClick={() => { handleAttachFile(); setShowAttachMenu(false); }}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 rounded-xl text-xs font-medium text-white/70 hover:text-white transition-all"
+                      disabled={uploadLimitReached}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all",
+                        uploadLimitReached
+                          ? "text-white/20 cursor-not-allowed"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
                     >
                       <FileText className="w-4 h-4 text-violet-400" />
-                      <span>Attach Document</span>
+                      <span>{uploadLimitReached ? "Daily limit reached" : `Attach Document (${uploadsRemaining}/5 left)`}</span>
                     </button>
                     <button
                       onClick={() => { imageInputRef.current?.click(); setShowAttachMenu(false); }}
