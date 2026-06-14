@@ -784,7 +784,7 @@ export function AnimatedAIChat() {
                   if (retries === 1) {
                     const waitMsg: any = {
                       role: "assistant",
-                      content: "_⏳ Indexing your document… automatically retrying when ready._",
+                      content: "_✨ Reading your document… automatically retrying when ready._",
                       timestamp: new Date(),
                       isNew: true,
                     };
@@ -2163,8 +2163,8 @@ export function AnimatedAIChat() {
                   >
                     {processingSessions.has(att.sessionId ?? "") ? (
                       <div className="flex items-center gap-2">
-                        <div className="w-5 h-5 rounded-full border-2 border-violet-400/30 border-t-violet-400 animate-spin" />
-                        <span className="text-violet-400/70 text-[10px] font-medium">Indexing...</span>
+                        <Sparkles className="w-4 h-4 text-violet-400 animate-pulse" />
+                        <span className="text-violet-400/70 text-[10px] font-medium">Reading...</span>
                       </div>
                     ) : att.thumbnail ? (
                       <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 flex-shrink-0 bg-black/30 p-0.5">
