@@ -77,7 +77,7 @@ def get_embeddings(api_key: Optional[str] = None):
         return _embedding_cache[key]
     google_key = api_key or os.environ.get("GOOGLE_API_KEY")
     if google_key:
-        emb = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_key)
+        emb = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=google_key)
     else:
         _ensure_ollama_model(EMBED_MODEL)
         emb = OllamaEmbeddings(model=EMBED_MODEL)
@@ -131,7 +131,19 @@ def _load_docx(path: str) -> list[Document]:
     try:
         import docx
         doc = docx.Document(path)
-        text = "\n".join(p.text for p in doc.paragraphs)
+        parts = [p.text for p in doc.paragraphs]
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    parts.append(cell.text)
+        for section in doc.sections:
+            if section.header:
+                for p in section.header.paragraphs:
+                    parts.append(p.text)
+            if section.footer:
+                for p in section.footer.paragraphs:
+                    parts.append(p.text)
+        text = "\n".join(parts)
         return [Document(page_content=text, metadata={"source": os.path.basename(path)})]
     except ImportError:
         raise ImportError("Install python-docx: pip install python-docx")

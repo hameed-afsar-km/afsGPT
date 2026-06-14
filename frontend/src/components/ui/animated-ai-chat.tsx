@@ -832,7 +832,6 @@ export function AnimatedAIChat() {
                     provider,
                     model,
                     apiKey,
-                    freeTier: useFreeTier,
                   }),
                 });
                 ragData = await ragRes.json();

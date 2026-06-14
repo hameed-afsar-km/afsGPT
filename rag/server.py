@@ -315,17 +315,12 @@ async def upload_file(
     # Generate thumbnail synchronously for PDFs so we can return the URL
     thumbnail_url = _generate_thumbnail_sync(save_path, session_id) if ext == ".pdf" else None
 
-    # In cloud mode, keep all files for direct analysis. Only delete non-PDFs in local mode.
-    if not apiKey and ext != ".pdf":
-        if os.path.exists(save_path):
-            os.remove(save_path)
-
     return JSONResponse({
         "session_id": session_id,
         "filename":   file.filename,
         "thumbnail":  thumbnail_url,
         "processing": is_processing,
-        "message":    "File received. Cloud mode — document will be sent directly to the AI."
+        "message":    "File received and queued for processing."
     })
 
 
@@ -356,7 +351,19 @@ async def direct_document_analysis(question: str, file_path: str, api_key: str, 
                 try:
                     import docx
                     doc = docx.Document(file_path)
-                    file_text = "\n".join(p.text for p in doc.paragraphs)
+                    parts = [p.text for p in doc.paragraphs]
+                    for table in doc.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                parts.append(cell.text)
+                    for section in doc.sections:
+                        if section.header:
+                            for p in section.header.paragraphs:
+                                parts.append(p.text)
+                        if section.footer:
+                            for p in section.footer.paragraphs:
+                                parts.append(p.text)
+                    file_text = "\n".join(parts)
                 except ImportError:
                     file_text = "(DOCX file uploaded — install python-docx for text extraction)"
             file_text = (file_text or "")[:100000]  # cap at 100K chars
@@ -545,6 +552,14 @@ async def clear_session(body: ClearRequest):
         clear_collection(collection_name=body.session_id)
         _processing_sessions.pop(body.session_id, None)
         _ingestion_errors.pop(body.session_id, None)
+        _thumbnail_urls.pop(body.session_id, None)
+        # Clean up the uploaded file for this session
+        for f in os.listdir(UPLOAD_DIR):
+            if f.startswith(body.session_id):
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, f))
+                except Exception as e:
+                    log.warning(f"Failed to delete {f}: {e}")
         log.info(f"[{body.session_id}] Collection cleared.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
